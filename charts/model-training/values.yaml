@@ -1,0 +1,30 @@
+# values.yaml — model-training chart
+
+# -------------------------------------------------------------------
+# Training config
+# -------------------------------------------------------------------
+config:
+  dataset:           "FD002"
+  trainingMode:      "offline"
+  nRuns:             "10"
+  rulCap:            "125"
+  awsRegion:         "ap-southeast-1"
+  s3RawBucket:       "phm-raw-data"
+  s3ArtifactsBucket: "phm-model-artifacts"
+  s3MlflowBucket:    "phm-mlflow-artifacts"
+
+# -------------------------------------------------------------------
+# PostgreSQL — MLflow backend
+# -------------------------------------------------------------------
+postgres:
+  host:     "phm-db.c9w4wkqky98g.ap-southeast-1.rds.amazonaws.com"
+  port:     "5432"
+  database: "phmdb"
+  username: "phmadmin"
+
+# -------------------------------------------------------------------
+# ServiceAccount / IRSA
+# -------------------------------------------------------------------
+serviceAccount:
+  name: model-training-sa
+  irsaRoleArn: "arn:aws:iam::982215135701:role/phm-model-training-irsa"

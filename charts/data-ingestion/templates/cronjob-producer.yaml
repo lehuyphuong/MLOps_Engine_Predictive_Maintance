@@ -1,0 +1,42 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: telemetry-producer
+  namespace: data-ingestion
+  labels:
+    app: telemetry-producer
+    component: data-ingestion
+spec:
+  schedule: {{ .Values.producer.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: telemetry-producer
+        spec:
+          serviceAccountName: {{ .Values.serviceAccount.name }}
+          restartPolicy: OnFailure
+
+          containers:
+            - name: producer
+              image: "{{ .Values.producer.image.repository }}:{{ .Values.producer.image.tag }}"
+              imagePullPolicy: {{ .Values.producer.image.pullPolicy }}
+              args: ["src/producer.py"]
+
+              envFrom:
+                - configMapRef:
+                    name: data-ingestion-config
+
+              resources:
+                requests:
+                  cpu:    {{ .Values.producer.resources.requests.cpu | quote }}
+                  memory: {{ .Values.producer.resources.requests.memory | quote }}
+                limits:
+                  cpu:    {{ .Values.producer.resources.limits.cpu | quote }}
+                  memory: {{ .Values.producer.resources.limits.memory | quote }}

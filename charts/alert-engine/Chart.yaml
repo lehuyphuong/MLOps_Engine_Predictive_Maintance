@@ -1,0 +1,6 @@
+apiVersion: v2
+name: alert-engine
+description: PHM alert-naming namespace — Alert Rule Engine + Elasticsearch Alert Index
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

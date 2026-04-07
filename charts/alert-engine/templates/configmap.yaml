@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alert-engine-config
+  namespace: alert-naming
+data:
+  DATASET:             {{ .Values.config.dataset | quote }}
+  AWS_REGION:          {{ .Values.config.awsRegion | quote }}
+  S3_RAW_BUCKET:       {{ .Values.config.s3RawBucket | quote }}
+  RUL_ALERT_THRESHOLD: {{ .Values.config.rulAlertThreshold | quote }}
+  ES_HOST:             {{ .Values.config.esHost | quote }}
+  ES_PORT:             {{ .Values.config.esPort | quote }}
+  ES_INDEX:            {{ .Values.config.esIndex | quote }}

@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-training-config
+  namespace: model-training
+data:
+  DATASET:              {{ .Values.config.dataset | quote }}
+  TRAINING_MODE:        {{ .Values.config.trainingMode | quote }}
+  N_RUNS:               {{ .Values.config.nRuns | quote }}
+  RUL_CAP:              {{ .Values.config.rulCap | quote }}
+  AWS_REGION:           {{ .Values.config.awsRegion | quote }}
+  S3_RAW_BUCKET:        {{ .Values.config.s3RawBucket | quote }}
+  S3_ARTIFACTS_BUCKET:  {{ .Values.config.s3ArtifactsBucket | quote }}
+  S3_MLFLOW_BUCKET:     {{ .Values.config.s3MlflowBucket | quote }}
+  DB_HOST:              {{ .Values.postgres.host | quote }}
+  DB_PORT:              {{ .Values.postgres.port | quote }}
+  DB_NAME:              {{ .Values.postgres.database | quote }}
+  DB_USER:              {{ .Values.postgres.username | quote }}
+  # Registry config
+  RMSE_THRESHOLD:       "0.30"
+  DRIFT_TOLERANCE:      "0.05"
+  POLL_INTERVAL:        "30"
+  POLL_TIMEOUT:         "3600"

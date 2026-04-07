@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-serving-config
+  namespace: model-serving
+data:
+  DATASET:                {{ .Values.config.dataset | quote }}
+  AWS_REGION:             {{ .Values.config.awsRegion | quote }}
+  S3_ARTIFACTS_BUCKET:    {{ .Values.config.s3ArtifactsBucket | quote }}
+  S3_RAW_BUCKET:          {{ .Values.config.s3RawBucket | quote }}
+  ANOMALY_MIN_CYCLES:     {{ .Values.config.anomalyMinCycles | quote }}
+  CV_STABILITY_THRESHOLD: {{ .Values.config.cvStabilityThreshold | quote }}
+  REDIS_HOST:             {{ .Values.redis.host | quote }}
+  REDIS_PORT:             {{ .Values.redis.port | quote }}

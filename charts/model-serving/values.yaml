@@ -1,0 +1,32 @@
+# values.yaml — model-serving chart
+
+config:
+  dataset:               "FD002"
+  awsRegion:             "ap-southeast-1"
+  s3ArtifactsBucket:     "phm-model-artifacts"
+  s3RawBucket:           "phm-raw-data"
+  anomalyMinCycles:      "10"
+  cvStabilityThreshold:  "0.15"
+
+redis:
+  host: "phm-redis.nji5t4.0001.apse1.cache.amazonaws.com"
+  port: "6379"
+
+deployment:
+  replicas: 1
+  image:
+    repository: 982215135701.dkr.ecr.ap-southeast-1.amazonaws.com/phm/model-serving
+    tag: latest
+    pullPolicy: Always
+  port: 8080
+  resources:
+    requests:
+      cpu:    "200m"
+      memory: "512Mi"
+    limits:
+      cpu:    "500m"
+      memory: "1Gi"
+
+serviceAccount:
+  name: model-serving-sa
+  irsaRoleArn: "arn:aws:iam::982215135701:role/phm-model-serving-irsa"

@@ -1,0 +1,54 @@
+# values.yaml — feature-platform chart
+
+# -------------------------------------------------------------------
+# Shared config
+# -------------------------------------------------------------------
+config:
+  dataset:      "FD002"
+  awsRegion:    "ap-southeast-1"
+  s3RawBucket:  "phm-raw-data"
+  windowSize:   "24"       # rolling window length per engine
+  rulCap:       "125"      # piecewise linear RUL cap
+
+# -------------------------------------------------------------------
+# Redis (online store) — from: terraform output redis_primary_endpoint
+# -------------------------------------------------------------------
+redis:
+  host: "phm-redis.nji5t4.0001.apse1.cache.amazonaws.com"
+  port: "6379"
+
+# -------------------------------------------------------------------
+# PostgreSQL (offline store) — from: terraform output feature_store_endpoint
+# -------------------------------------------------------------------
+postgres:
+  host:     "phm-db.c9w4wkqky98g.ap-southeast-1.rds.amazonaws.com"
+  port:     "5432"
+  database: "phmdb"
+  username: "phmadmin"
+  # password injected via Kubernetes Secret — see secret.yaml
+
+# -------------------------------------------------------------------
+# Stream Processor CronJob
+# -------------------------------------------------------------------
+streamProcessor:
+  # Runs 3 min after validation service completes (validator runs at */5)
+  schedule: "3-58/5 * * * *"
+  image:
+    repository: 982215135701.dkr.ecr.ap-southeast-1.amazonaws.com/phm/stream-processor
+    tag: latest
+    pullPolicy: Always
+  resources:
+    requests:
+      cpu:    "100m"
+      memory: "256Mi"
+    limits:
+      cpu:    "500m"
+      memory: "512Mi"
+
+# -------------------------------------------------------------------
+# ServiceAccount / IRSA
+# -------------------------------------------------------------------
+serviceAccount:
+  name: feature-platform-sa
+  # ARN from: terraform output irsa_role_data_ingestion
+  irsaRoleArn: "arn:aws:iam::982215135701:role/phm-feature-platform-irsa"

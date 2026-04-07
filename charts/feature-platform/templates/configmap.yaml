@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: feature-platform-config
+  namespace: feature-platform
+data:
+  DATASET:       {{ .Values.config.dataset | quote }}
+  AWS_REGION:    {{ .Values.config.awsRegion | quote }}
+  S3_RAW_BUCKET: {{ .Values.config.s3RawBucket | quote }}
+  WINDOW_SIZE:   {{ .Values.config.windowSize | quote }}
+  RUL_CAP:       {{ .Values.config.rulCap | quote }}
+  REDIS_HOST:    {{ .Values.redis.host | quote }}
+  REDIS_PORT:    {{ .Values.redis.port | quote }}
+  DB_HOST:       {{ .Values.postgres.host | quote }}
+  DB_PORT:       {{ .Values.postgres.port | quote }}
+  DB_NAME:       {{ .Values.postgres.database | quote }}
+  DB_USER:       {{ .Values.postgres.username | quote }}

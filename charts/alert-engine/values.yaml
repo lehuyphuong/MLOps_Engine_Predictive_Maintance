@@ -1,0 +1,41 @@
+# values.yaml — alert-engine chart
+
+config:
+  dataset:           "FD002"
+  awsRegion:         "ap-southeast-1"
+  s3RawBucket:       "phm-raw-data"
+  rulAlertThreshold: "20"      # alert when RUL < 20 cycles
+  esHost:            "elasticsearch-svc"
+  esPort:            "9200"
+  esIndex:           "phm-alerts"
+
+# Alert Rule Engine CronJob
+alertEngine:
+  schedule: "*/5 * * * *"    # runs every 5 min after model-serving writes results
+  image:
+    repository: 982215135701.dkr.ecr.ap-southeast-1.amazonaws.com/phm/alert-engine
+    tag: latest
+    pullPolicy: Always
+  resources:
+    requests:
+      cpu:    "100m"
+      memory: "128Mi"
+    limits:
+      cpu:    "200m"
+      memory: "256Mi"
+
+# Elasticsearch — single node, no replicas (free tier)
+elasticsearch:
+  image:          "docker.elastic.co/elasticsearch/elasticsearch:8.12.0"
+  storageSize:    "5Gi"
+  resources:
+    requests:
+      cpu:    "100m"
+      memory: "128Mi"
+    limits:
+      cpu:    "200m"
+      memory: "256Mi"
+
+serviceAccount:
+  name: alert-engine-sa
+  irsaRoleArn: "arn:aws:iam::982215135701:role/phm-data-ingestion-irsa"

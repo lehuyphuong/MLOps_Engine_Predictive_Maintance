@@ -1,0 +1,143 @@
+---
+# DaemonSet — sets vm.max_map_count on the node before Elasticsearch starts
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: es-sysctl
+  namespace: alert-naming
+  labels:
+    app: es-sysctl
+spec:
+  selector:
+    matchLabels:
+      app: es-sysctl
+  template:
+    metadata:
+      labels:
+        app: es-sysctl
+    spec:
+      hostPID: true
+      hostIPC: true
+      hostNetwork: true
+      initContainers:
+        - name: sysctl
+          image: busybox
+          command: ["sysctl", "-w", "vm.max_map_count=262144"]
+          securityContext:
+            privileged: true
+      containers:
+        - name: pause
+          image: gcr.io/google-containers/pause:3.1
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "10Mi"
+            limits:
+              cpu: "10m"
+              memory: "10Mi"
+---
+# Elasticsearch StatefulSet — single node, no replicas (free tier)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: elasticsearch
+  namespace: alert-naming
+  labels:
+    app: elasticsearch
+spec:
+  serviceName: elasticsearch-svc
+  replicas: 1
+  selector:
+    matchLabels:
+      app: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+
+      containers:
+        - name: elasticsearch
+          image: {{ .Values.elasticsearch.image }}
+          ports:
+            - containerPort: 9200
+              name: http
+            - containerPort: 9300
+              name: transport
+
+          env:
+            - name: discovery.type
+              value: "single-node"
+            - name: ES_JAVA_OPTS
+              value: "-Xms256m -Xmx512m"
+            - name: xpack.security.enabled
+              value: "false"
+            - name: xpack.security.http.ssl.enabled
+              value: "false"
+            - name: bootstrap.memory_lock
+              value: "false"
+            - name: cluster.name
+              value: "phm-cluster"
+            - name: node.name
+              value: "phm-es-node-1"
+
+          livenessProbe:
+            httpGet:
+              path: /_cluster/health
+              port: 9200
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            failureThreshold: 5
+
+          readinessProbe:
+            httpGet:
+              path: /_cluster/health?wait_for_status=yellow
+              port: 9200
+            initialDelaySeconds: 90
+            periodSeconds: 10
+            failureThreshold: 5
+
+          resources:
+            requests:
+              cpu:    {{ .Values.elasticsearch.resources.requests.cpu | quote }}
+              memory: {{ .Values.elasticsearch.resources.requests.memory | quote }}
+            limits:
+              cpu:    {{ .Values.elasticsearch.resources.limits.cpu | quote }}
+              memory: {{ .Values.elasticsearch.resources.limits.memory | quote }}
+
+          volumeMounts:
+            - name: es-data
+              mountPath: /usr/share/elasticsearch/data
+
+  volumeClaimTemplates:
+    - metadata:
+        name: es-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: gp2
+        resources:
+          requests:
+            storage: {{ .Values.elasticsearch.storageSize }}
+
+---
+# ClusterIP Service for Elasticsearch
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch-svc
+  namespace: alert-naming
+  labels:
+    app: elasticsearch
+spec:
+  selector:
+    app: elasticsearch
+  ports:
+    - name: http
+      port: 9200
+      targetPort: 9200
+    - name: transport
+      port: 9300
+      targetPort: 9300
+  type: ClusterIP

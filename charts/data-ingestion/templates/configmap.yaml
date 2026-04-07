@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: data-ingestion-config
+  namespace: data-ingestion
+data:
+  DATASET:           {{ .Values.config.dataset | quote }}
+  AWS_REGION:        {{ .Values.config.awsRegion | quote }}
+  S3_BUCKET:         {{ .Values.config.s3RawBucket | quote }}
+  S3_RAW_BUCKET:     {{ .Values.config.s3RawBucket | quote }}
+  S3_QUALITY_BUCKET: {{ .Values.config.s3QualityBucket | quote }}
+  DATA_DIR:          {{ .Values.config.dataDir | quote }}
+  CYCLES_PER_RUN:    {{ .Values.config.cyclesPerRun | quote }}
+  S3_DATA_KEY: {{ .Values.config.s3DataKey | quote }}

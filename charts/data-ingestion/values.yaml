@@ -1,0 +1,63 @@
+# -------------------------------------------------------------------
+# Shared config
+# -------------------------------------------------------------------
+config:
+  dataset:          "FD002"
+  awsRegion:        "ap-southeast-1"
+  s3RawBucket:      "phm-raw-data"
+  s3QualityBucket:  "phm-data-quality"
+  dataDir:          "/data/CMaps"
+  cyclesPerRun:     "50"          # rows emitted per producer trigger
+  s3DataKey: "cmapss-data/simulated_FD002.txt"
+
+# -------------------------------------------------------------------
+# Producer CronJob
+# -------------------------------------------------------------------
+producer:
+  schedule: "*/5 * * * *"         # every 5 min — adjust to control data flow rate
+  image:
+    repository: 982215135701.dkr.ecr.ap-southeast-1.amazonaws.com/phm/data-ingestion
+    tag: latest
+    pullPolicy: Always
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+# -------------------------------------------------------------------
+# Validation Service CronJob
+# -------------------------------------------------------------------
+validator:
+  schedule: "2-57/5 * * * *"      # 2 min after producer on every 5-min mark
+  image:
+    repository: 982215135701.dkr.ecr.ap-southeast-1.amazonaws.com/phm/validation-service
+    tag: latest
+    pullPolicy: Always
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "300m"
+      memory: "256Mi"
+
+# -------------------------------------------------------------------
+# ServiceAccount / IRSA
+# -------------------------------------------------------------------
+serviceAccount:
+  name: data-ingestion-sa
+  # ARN from: terraform output irsa_role_data_ingestion
+  irsaRoleArn: "arn:aws:iam::982215135701:role/phm-data-ingestion-irsa"
+
+# -------------------------------------------------------------------
+# PersistentVolumeClaim for C-MAPSS data files or S3
+# -------------------------------------------------------------------
+# pvc:
+#   name: cmapss-data-pvc
+#   storage: 512Mi
+#   nodePath: /mnt/cmapss-data      # path on EKS worker node
+
+
