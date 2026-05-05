@@ -91,10 +91,7 @@ pipeline {
             post {
                 always {
                     junit allowEmptyResults: true,
-                          testResults: "test-results.xml"
-                    publishCoverage adapters: [
-                        coberturaAdapter(path: "coverage.xml")
-                    ]
+                        testResults: "test-results.xml"
                 }
                 failure {
                     echo "Unit tests FAILED — deployment blocked"
