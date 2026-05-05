@@ -1,0 +1,177 @@
+---
+# Prometheus config — scrape rules
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval:     15s
+      evaluation_interval: 15s
+
+    scrape_configs:
+
+      # Kubernetes node metrics
+      - job_name: 'kubernetes-nodes'
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+
+      # Kubernetes pod metrics (kube-state-metrics style)
+      - job_name: 'kubernetes-pods'
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: kubernetes_pod_name
+
+      # FastAPI model-serving /metrics endpoint
+      - job_name: 'phm-model-serving'
+        static_configs:
+          - targets:
+              - 'model-serving-svc.model-serving.svc.cluster.local:80'
+        metrics_path: /metrics
+        scrape_interval: 15s
+
+      # kube-state-metrics — pod restarts, deployment status
+      # Running in gke-managed-cim namespace on GKE
+      - job_name: 'kube-state-metrics'
+        static_configs:
+          - targets:
+              - 'kube-state-metrics.gke-managed-cim.svc.cluster.local:8080'
+        metric_relabel_configs:
+          - source_labels: [__name__]
+            regex: 'kube_pod_container_status_restarts_total|kube_deployment_status_replicas_available|kube_pod_status_phase'
+            action: keep
+
+      # Prometheus self-monitoring
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+        metrics_path: /prometheus/metrics
+
+---
+# Prometheus storage — PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-pvc
+  namespace: monitoring
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: standard-rwo
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+# Prometheus Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: monitoring
+  labels:
+    app: prometheus
+spec:
+  replicas: {{ .Values.prometheus.replicas }}
+  strategy:
+    type: Recreate   # kill old pod before starting new one — required for ReadWriteOnce PVC
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      serviceAccountName: prometheus-sa
+      securityContext:
+        fsGroup: 65534
+        runAsUser: 65534
+        runAsNonRoot: true
+      containers:
+        - name: prometheus
+          image: "{{ .Values.prometheus.image.repository }}:{{ .Values.prometheus.image.tag }}"
+          imagePullPolicy: {{ .Values.prometheus.image.pullPolicy }}
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--storage.tsdb.retention.time={{ .Values.prometheus.retentionTime }}"
+            - "--web.enable-lifecycle"
+            - "--web.external-url=http://{{ .Values.ingress.devIp }}/prometheus"
+            - "--web.route-prefix=/prometheus"
+          ports:
+            - containerPort: {{ .Values.prometheus.port }}
+          volumeMounts:
+            - name: prometheus-config
+              mountPath: /etc/prometheus
+            - name: prometheus-storage
+              mountPath: /prometheus
+          livenessProbe:
+            httpGet:
+              path: /prometheus/-/healthy
+              port: {{ .Values.prometheus.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /prometheus/-/ready
+              port: {{ .Values.prometheus.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu:    {{ .Values.prometheus.resources.requests.cpu | quote }}
+              memory: {{ .Values.prometheus.resources.requests.memory | quote }}
+            limits:
+              cpu:    {{ .Values.prometheus.resources.limits.cpu | quote }}
+              memory: {{ .Values.prometheus.resources.limits.memory | quote }}
+      volumes:
+        - name: prometheus-config
+          configMap:
+            name: prometheus-config
+        - name: prometheus-storage
+          persistentVolumeClaim:
+            claimName: prometheus-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-svc
+  namespace: monitoring
+spec:
+  selector:
+    app: prometheus
+  ports:
+    - port: 9090
+      targetPort: {{ .Values.prometheus.port }}
+  type: ClusterIP

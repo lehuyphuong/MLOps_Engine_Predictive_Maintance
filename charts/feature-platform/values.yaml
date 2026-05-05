@@ -5,50 +5,55 @@
 # -------------------------------------------------------------------
 config:
   dataset:      "FD002"
-  awsRegion:    "ap-southeast-1"
-  s3RawBucket:  "phm-raw-data"
+  gcpProject:   "aide2-494008"
+  gcpRegion:    "us-central1"
+  gcsBucket:    "phm-raw-data-aide2-494008"
   windowSize:   "24"       # rolling window length per engine
   rulCap:       "125"      # piecewise linear RUL cap
 
 # -------------------------------------------------------------------
-# Redis (online store) — from: terraform output redis_primary_endpoint
+# Redis (online store) — from: terraform output redis_host
 # -------------------------------------------------------------------
 redis:
-  host: "phm-redis.nji5t4.0001.apse1.cache.amazonaws.com"
+  host: "10.72.0.3"   # terraform output redis_host
   port: "6379"
 
 # -------------------------------------------------------------------
-# PostgreSQL (offline store) — from: terraform output feature_store_endpoint
+# PostgreSQL (offline store) — from: terraform output db_private_ip
 # -------------------------------------------------------------------
 postgres:
-  host:     "phm-db.c9w4wkqky98g.ap-southeast-1.rds.amazonaws.com"
+  host:     "10.72.1.3"  # terraform output db_private_ip
   port:     "5432"
   database: "phmdb"
   username: "phmadmin"
-  # password injected via Kubernetes Secret — see secret.yaml
+  # password injected via Kubernetes Secret — feature-platform-secrets
 
 # -------------------------------------------------------------------
-# Stream Processor CronJob
+# Stream Processor — PyFlink CronJob
+# Runs 3 min after validation service completes (validator runs at */5)
+# PyFlink chosen over full Flink cluster to stay within e2-standard-4
+# resource budget (no separate JobManager + TaskManager JVMs needed).
+# Single pod runs PyFlink in local execution mode — sufficient for the
+# 24-cycle windowed aggregation workload on this dataset size.
 # -------------------------------------------------------------------
 streamProcessor:
-  # Runs 3 min after validation service completes (validator runs at */5)
   schedule: "3-58/5 * * * *"
   image:
-    repository: 982215135701.dkr.ecr.ap-southeast-1.amazonaws.com/phm/stream-processor
+    repository: us-central1-docker.pkg.dev/aide2-494008/phm-stream-processor/stream-processor
     tag: latest
     pullPolicy: Always
   resources:
     requests:
-      cpu:    "100m"
-      memory: "256Mi"
+      cpu:    "250m"
+      memory: "512Mi"    # increased from 256Mi — PyFlink JVM needs headroom
     limits:
       cpu:    "500m"
-      memory: "512Mi"
+      memory: "1Gi"      # hard cap — stays well within e2-standard-4 (16GB)
 
 # -------------------------------------------------------------------
-# ServiceAccount / IRSA
+# ServiceAccount / Workload Identity
 # -------------------------------------------------------------------
 serviceAccount:
   name: feature-platform-sa
-  # ARN from: terraform output irsa_role_data_ingestion
-  irsaRoleArn: "arn:aws:iam::982215135701:role/phm-feature-platform-irsa"
+  # Email from: terraform output workload_identity_annotations
+  gcpServiceAccount: "phm-feature-platform@aide2-494008.iam.gserviceaccount.com"

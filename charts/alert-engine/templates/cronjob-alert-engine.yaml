@@ -33,6 +33,18 @@ spec:
                 - configMapRef:
                     name: alert-engine-config
 
+              env:
+              - name: DB_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: alert-engine-secrets
+                    key: db-password
+              - name: SENDGRID_API_KEY
+                valueFrom:
+                  secretKeyRef:
+                    name: alert-engine-secrets
+                    key: sendgrid-api-key
+
               resources:
                 requests:
                   cpu:    {{ .Values.alertEngine.resources.requests.cpu | quote }}

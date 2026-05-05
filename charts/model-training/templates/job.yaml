@@ -19,7 +19,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: trainer
-          image: 982215135701.dkr.ecr.ap-southeast-1.amazonaws.com/phm/model-training:latest
+          image: us-central1-docker.pkg.dev/aide2-494008/phm-model-training/model-training:latest
           imagePullPolicy: Always
           args: ["src/train_RUL.py"]
           envFrom:
@@ -59,7 +59,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: trainer
-          image: 982215135701.dkr.ecr.ap-southeast-1.amazonaws.com/phm/model-training:latest
+          image: us-central1-docker.pkg.dev/aide2-494008/phm-model-training/model-training:latest
           imagePullPolicy: Always
           args: ["src/train_anomaly.py"]
           envFrom:
@@ -109,7 +109,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: registry
-          image: 982215135701.dkr.ecr.ap-southeast-1.amazonaws.com/phm/model-registry:latest
+          image: us-central1-docker.pkg.dev/aide2-494008/phm-model-registry/model-registry:latest
           imagePullPolicy: Always
           args: ["src/promote.py"]
           envFrom:

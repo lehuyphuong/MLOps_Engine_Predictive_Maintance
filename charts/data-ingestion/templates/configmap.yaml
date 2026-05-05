@@ -5,10 +5,10 @@ metadata:
   namespace: data-ingestion
 data:
   DATASET:           {{ .Values.config.dataset | quote }}
-  AWS_REGION:        {{ .Values.config.awsRegion | quote }}
-  S3_BUCKET:         {{ .Values.config.s3RawBucket | quote }}
-  S3_RAW_BUCKET:     {{ .Values.config.s3RawBucket | quote }}
-  S3_QUALITY_BUCKET: {{ .Values.config.s3QualityBucket | quote }}
-  DATA_DIR:          {{ .Values.config.dataDir | quote }}
+  GCP_PROJECT:       {{ .Values.config.gcpProject | quote }}
+  GCP_REGION:        {{ .Values.config.gcpRegion | quote }}
+  GCS_BUCKET:        {{ .Values.config.gcsBucket | quote }}
+  GCS_RAW_BUCKET:    {{ .Values.config.gcsBucket | quote }}
+  GCS_QUALITY_BUCKET: {{ .Values.config.gcsQualityBucket | quote }}
   CYCLES_PER_RUN:    {{ .Values.config.cyclesPerRun | quote }}
-  S3_DATA_KEY: {{ .Values.config.s3DataKey | quote }}
+  GCS_DATA_KEY:      {{ .Values.config.gcsDataKey | quote }}

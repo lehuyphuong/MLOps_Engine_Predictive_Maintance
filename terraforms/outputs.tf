@@ -1,64 +1,96 @@
-# -------------------------------
-# EKS
-# -------------------------------
+# ---------------------------------------------------------------
+# GKE
+# ---------------------------------------------------------------
 
 output "cluster_name" {
-  description = "Name of the EKS cluster"
-  value       = aws_eks_cluster.main.name
+  description = "Name of the GKE cluster"
+  value       = google_container_cluster.phm_gke.name
+}
+
+output "cluster_location" {
+  description = "Region of the GKE cluster"
+  value       = google_container_cluster.phm_gke.location
 }
 
 output "cluster_endpoint" {
-  description = "Public endpoint of the EKS control plane"
-  value       = aws_eks_cluster.main.endpoint
+  description = "Public endpoint of the GKE control plane"
+  value       = google_container_cluster.phm_gke.endpoint
 }
 
 output "cluster_ca_certificate" {
   description = "Cluster CA certificate (base64)"
-  value       = aws_eks_cluster.main.certificate_authority[0].data
+  value       = google_container_cluster.phm_gke.master_auth[0].cluster_ca_certificate
   sensitive   = true
 }
 
-output "aws_get_credentials_command" {
+output "gcloud_get_credentials_command" {
   description = "Run this to configure kubectl"
-  value       = "aws eks update-kubeconfig --name ${aws_eks_cluster.main.name} --region ${var.aws_region}"
+  value       = "gcloud container clusters get-credentials ${google_container_cluster.phm_gke.name} --region ${var.region} --project ${var.project_id}"
 }
 
-output "eks_oidc_issuer_url" {
-  description = "OIDC issuer URL — referenced by IRSA trust policies"
-  value       = aws_eks_cluster.main.identity[0].oidc[0].issuer
+# ---------------------------------------------------------------
+# Artifact Registry — image URLs for Helm values.yaml
+# ---------------------------------------------------------------
+
+output "artifact_registry_urls" {
+  description = "Map of service → Artifact Registry image URL base (append :tag)"
+  value = {
+    for k, repo in google_artifact_registry_repository.phm_repos :
+    k => "${var.region}-docker.pkg.dev/${var.project_id}/${repo.repository_id}"
+  }
 }
 
-# -------------------------------
-# Networking
-# -------------------------------
-
-output "vpc_id" {
-  description = "VPC ID"
-  value       = aws_vpc.main.id
+output "docker_auth_command" {
+  description = "Run this once to configure docker to push to Artifact Registry"
+  value       = "gcloud auth configure-docker ${var.region}-docker.pkg.dev"
 }
 
-output "private_subnet_id" {
-  description = "Private subnet ID — EKS node, RDS, Redis"
-  value       = aws_subnet.private.id
+# ---------------------------------------------------------------
+# GCS Buckets
+# ---------------------------------------------------------------
+
+output "gcs_raw_data_bucket" {
+  description = "GCS bucket for raw C-MAPSS sensor events"
+  value       = google_storage_bucket.phm_buckets["raw_data"].name
 }
 
-# -------------------------------
-# RDS
-# -------------------------------
+output "gcs_model_artifacts_bucket" {
+  description = "GCS bucket for trained model binaries"
+  value       = google_storage_bucket.phm_buckets["model_artifacts"].name
+}
 
-output "db_endpoint" {
-  description = "RDS PostgreSQL endpoint (host:port)"
-  value       = aws_db_instance.main.endpoint
+output "gcs_mlflow_bucket" {
+  description = "GCS bucket used as MLflow artifact store (set as gs://... in MLflow URI)"
+  value       = google_storage_bucket.phm_buckets["mlflow"].name
+}
+
+output "gcs_data_quality_bucket" {
+  description = "GCS bucket for invalid / rejected records"
+  value       = google_storage_bucket.phm_buckets["data_quality"].name
+}
+
+# ---------------------------------------------------------------
+# Cloud SQL — PostgreSQL
+# ---------------------------------------------------------------
+
+output "db_private_ip" {
+  description = "Private IP of the Cloud SQL PostgreSQL instance — use this as DB_HOST in all configmaps"
+  value       = google_sql_database_instance.phm_pg.private_ip_address
+}
+
+output "db_connection_name" {
+  description = "Cloud SQL connection name (project:region:instance) — needed if using Cloud SQL Auth Proxy"
+  value       = google_sql_database_instance.phm_pg.connection_name
 }
 
 output "db_name" {
   description = "Database name"
-  value       = aws_db_instance.main.db_name
+  value       = google_sql_database.phmdb.name
 }
 
 output "db_username" {
   description = "Database master username"
-  value       = aws_db_instance.main.username
+  value       = google_sql_user.phmadmin.name
 }
 
 output "db_password" {
@@ -67,72 +99,45 @@ output "db_password" {
   sensitive   = true
 }
 
-# -------------------------------
-# ElastiCache Redis
-# -------------------------------
+# ---------------------------------------------------------------
+# Memorystore Redis
+# ---------------------------------------------------------------
 
-output "redis_endpoint" {
-  description = "Redis cache endpoint"
-  value       = aws_elasticache_cluster.main.cache_nodes[0].address
+output "redis_host" {
+  description = "Redis private IP — use as REDIS_HOST in feature-platform and model-serving configmaps"
+  value       = google_redis_instance.phm_redis.host
 }
 
 output "redis_port" {
   description = "Redis port"
-  value       = aws_elasticache_cluster.main.cache_nodes[0].port
+  value       = google_redis_instance.phm_redis.port
 }
 
-# -------------------------------
-# S3
-# -------------------------------
+# ---------------------------------------------------------------
+# Workload Identity — GSA emails for Helm serviceAccount annotations
+# ---------------------------------------------------------------
 
-output "s3_raw_data_bucket" {
-  description = "S3 bucket for raw C-MAPSS sensor data"
-  value       = aws_s3_bucket.main["raw_data"].id
+output "workload_identity_annotations" {
+  description = "Paste these into each chart's values.yaml under serviceAccount.annotations"
+  value = {
+    data_ingestion   = "iam.gke.io/gcp-service-account: ${google_service_account.data_ingestion.email}"
+    feature_platform = "iam.gke.io/gcp-service-account: ${google_service_account.feature_platform.email}"
+    model_training   = "iam.gke.io/gcp-service-account: ${google_service_account.model_training.email}"
+    model_serving    = "iam.gke.io/gcp-service-account: ${google_service_account.model_serving.email}"
+    alert_engine     = "iam.gke.io/gcp-service-account: ${google_service_account.alert_engine.email}"
+  }
 }
 
-output "s3_model_artifacts_bucket" {
-  description = "S3 bucket for trained model binaries"
-  value       = aws_s3_bucket.main["model_artifacts"].id
+# ---------------------------------------------------------------
+# Networking
+# ---------------------------------------------------------------
+
+output "vpc_name" {
+  description = "VPC network name"
+  value       = google_compute_network.phm_vpc.name
 }
 
-output "s3_mlflow_bucket" {
-  description = "S3 bucket used as MLflow artifact store"
-  value       = aws_s3_bucket.main["mlflow"].id
-}
-
-output "s3_data_quality_bucket" {
-  description = "S3 bucket for invalid records"
-  value       = aws_s3_bucket.main["data_quality"].id
-}
-
-# -------------------------------
-# ECR
-# -------------------------------
-
-output "ecr_repository_urls" {
-  description = "Map of service name → ECR repository URL (used in Jenkinsfile)"
-  value       = { for k, r in aws_ecr_repository.main : k => r.repository_url }
-}
-
-# -------------------------------
-# IAM / IRSA
-# -------------------------------
-
-output "irsa_role_model_training" {
-  description = "IRSA role ARN — annotate model-training ServiceAccount with this"
-  value       = aws_iam_role.model_training.arn
-}
-
-output "irsa_role_model_serving" {
-  description = "IRSA role ARN — annotate model-serving ServiceAccount with this"
-  value       = aws_iam_role.model_serving.arn
-}
-
-output "irsa_role_data_ingestion" {
-  description = "IRSA role ARN — annotate data-ingestion ServiceAccount with this"
-  value       = aws_iam_role.data_ingestion.arn
-}
-
-output "irsa_role_feature_platform" {
-  value = aws_iam_role.feature_platform.arn
+output "subnet_name" {
+  description = "Subnetwork name"
+  value       = google_compute_subnetwork.phm_subnet.name
 }

@@ -2,20 +2,21 @@
 
 config:
   dataset:               "FD002"
-  awsRegion:             "ap-southeast-1"
-  s3ArtifactsBucket:     "phm-model-artifacts"
-  s3RawBucket:           "phm-raw-data"
+  gcpProject:            "aide2-494008"
+  gcpRegion:             "us-central1"
+  gcsArtifactsBucket:    "phm-model-artifacts-aide2-494008"
+  gcsRawBucket:          "phm-raw-data-aide2-494008"
   anomalyMinCycles:      "10"
   cvStabilityThreshold:  "0.15"
 
 redis:
-  host: "phm-redis.nji5t4.0001.apse1.cache.amazonaws.com"
+  host: "10.72.0.3"   # terraform output redis_host
   port: "6379"
 
 deployment:
   replicas: 1
   image:
-    repository: 982215135701.dkr.ecr.ap-southeast-1.amazonaws.com/phm/model-serving
+    repository: us-central1-docker.pkg.dev/aide2-494008/phm-model-serving/model-serving
     tag: latest
     pullPolicy: Always
   port: 8080
@@ -25,8 +26,9 @@ deployment:
       memory: "512Mi"
     limits:
       cpu:    "500m"
-      memory: "1Gi"
+      memory: "640Mi"
 
 serviceAccount:
   name: model-serving-sa
-  irsaRoleArn: "arn:aws:iam::982215135701:role/phm-model-serving-irsa"
+  # Email from: terraform output workload_identity_annotations
+  gcpServiceAccount: "phm-model-serving@aide2-494008.iam.gserviceaccount.com"

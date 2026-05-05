@@ -1,9 +1,9 @@
 """
 validation_service.py — Validation Service
-Reads raw cycle events from S3 (raw_engine_cycles/), validates each batch
+Reads raw cycle events from GCS (raw_engine_cycles/), validates each batch
 using Great Expectations Core, then routes to:
-  valid   -> s3://phm-raw-data/validated_engine_cycles/
-  invalid -> s3://phm-data-quality/invalid_engine_cycles/
+  valid   -> gs://phm-raw-data-.../validated_engine_cycles/
+  invalid -> gs://phm-data-quality-.../invalid_engine_cycles/
 
 Four expectation suites matching the diagram:
   1. schema  — required fields present, correct types
@@ -12,42 +12,45 @@ Four expectation suites matching the diagram:
   4. order   — cycle >= 1, unit_id >= 1
 
 Environment variables:
-  S3_RAW_BUCKET      phm-raw-data
-  S3_QUALITY_BUCKET  phm-data-quality
-  DATASET            FD002
-  AWS_REGION         ap-southeast-1
+  GCS_RAW_BUCKET      phm-raw-data-aide2-494008
+  GCS_QUALITY_BUCKET  phm-data-quality-aide2-494008
+  DATASET             FD002
+  GCP_PROJECT         aide2-494008
 """
 
 import os
 import json
 import logging
-import boto3
 import pandas as pd
 import great_expectations as gx
 from great_expectations.core import ExpectationSuite, ExpectationConfiguration
 from datetime import datetime, timezone
-from botocore.exceptions import ClientError
+from google.cloud import storage
+from google.cloud.exceptions import NotFound
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-S3_RAW_BUCKET     = os.environ.get("S3_RAW_BUCKET",     "phm-raw-data")
-S3_QUALITY_BUCKET = os.environ.get("S3_QUALITY_BUCKET", "phm-data-quality")
-DATASET           = os.environ.get("DATASET",            "FD002")
-AWS_REGION        = os.environ.get("AWS_REGION",         "ap-southeast-1")
+GCS_RAW_BUCKET     = os.environ.get("GCS_RAW_BUCKET",     "phm-raw-data-aide2-494008")
+GCS_QUALITY_BUCKET = os.environ.get("GCS_QUALITY_BUCKET", "phm-data-quality-aide2-494008")
+DATASET            = os.environ.get("DATASET",             "FD002")
+GCP_PROJECT        = os.environ.get("GCP_PROJECT",         "aide2-494008")
 
 RAW_PREFIX     = f"raw_engine_cycles/{DATASET}/"
 VALID_PREFIX   = f"validated_engine_cycles/{DATASET}/"
 INVALID_PREFIX = f"invalid_engine_cycles/{DATASET}/"
 CHECKPOINT_KEY = f"checkpoints/{DATASET}/validated_keys.json"
 
-s3 = boto3.client("s3", region_name=AWS_REGION)
+# ---------------------------------------------------------------------------
+# GCS client  (replaces boto3.client("s3"))
+# ---------------------------------------------------------------------------
+gcs = storage.Client(project=GCP_PROJECT)
 
 SENSOR_COLS     = [f"SensorMes{j}" for j in range(1, 22)]
 OPSET_COLS      = [f"OperSet{i}"   for i in range(1, 4)]
 ALL_SENSOR_KEYS = OPSET_COLS + SENSOR_COLS
 
-# C-MAPSS FD002 observed sensor bounds
+# C-MAPSS FD002 observed sensor bounds — identical to original
 SENSOR_RANGES = {
     "OperSet1":    (0.0,    100.0),  "OperSet2":    (0.0,    1.0),
     "OperSet3":    (0.0,    100.0),  "SensorMes1":  (400.0,  550.0),
@@ -138,24 +141,21 @@ def validate_event(event: dict, suite: ExpectationSuite, context) -> tuple[bool,
 
 def load_processed_keys() -> set:
     try:
-        obj  = s3.get_object(Bucket=S3_RAW_BUCKET, Key=CHECKPOINT_KEY)
-        data = json.loads(obj["Body"].read())
+        blob = gcs.bucket(GCS_RAW_BUCKET).blob(CHECKPOINT_KEY)
+        data = json.loads(blob.download_as_text())
         return set(data.get("processed", []))
-    except ClientError as e:
-        if e.response["Error"]["Code"] == "NoSuchKey":
-            return set()
-        raise
+    except NotFound:
+        return set()
 
 
 def save_processed_keys(keys: set) -> None:
-    s3.put_object(
-        Bucket=S3_RAW_BUCKET,
-        Key=CHECKPOINT_KEY,
-        Body=json.dumps({
+    blob = gcs.bucket(GCS_RAW_BUCKET).blob(CHECKPOINT_KEY)
+    blob.upload_from_string(
+        json.dumps({
             "processed":  list(keys),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }),
-        ContentType="application/json",
+        content_type="application/json",
     )
 
 
@@ -166,13 +166,12 @@ def route_event(event: dict, source_key: str, is_valid: bool, failures: list) ->
 
     if is_valid:
         dest_key = f"{VALID_PREFIX}unit_{unit:03d}/{filename}"
-        s3.put_object(
-            Bucket=S3_RAW_BUCKET,
-            Key=dest_key,
-            Body=json.dumps(event),
-            ContentType="application/json",
+        blob = gcs.bucket(GCS_RAW_BUCKET).blob(dest_key)
+        blob.upload_from_string(
+            json.dumps(event),
+            content_type="application/json",
         )
-        log.debug(f"VALID   -> s3://{S3_RAW_BUCKET}/{dest_key}")
+        log.debug(f"VALID   -> gs://{GCS_RAW_BUCKET}/{dest_key}")
     else:
         bad_event = {
             **event,
@@ -181,13 +180,12 @@ def route_event(event: dict, source_key: str, is_valid: bool, failures: list) ->
             "source_key":          source_key,
         }
         dest_key = f"{INVALID_PREFIX}unit_{unit}/{ts}_{filename}"
-        s3.put_object(
-            Bucket=S3_QUALITY_BUCKET,
-            Key=dest_key,
-            Body=json.dumps(bad_event),
-            ContentType="application/json",
+        blob = gcs.bucket(GCS_QUALITY_BUCKET).blob(dest_key)
+        blob.upload_from_string(
+            json.dumps(bad_event),
+            content_type="application/json",
         )
-        log.warning(f"INVALID -> s3://{S3_QUALITY_BUCKET}/{dest_key} failures={failures}")
+        log.warning(f"INVALID -> gs://{GCS_QUALITY_BUCKET}/{dest_key} failures={failures}")
 
 
 def main():
@@ -197,12 +195,11 @@ def main():
     suite   = build_expectation_suite()
     log.info("GX suite ready — schema / null / range / order")
 
-    paginator = s3.get_paginator("list_objects_v2")
-    all_keys  = [
-        obj["Key"]
-        for page in paginator.paginate(Bucket=S3_RAW_BUCKET, Prefix=RAW_PREFIX)
-        for obj in page.get("Contents", [])
-        if obj["Key"].endswith(".json") and "checkpoint" not in obj["Key"]
+    # list_blobs replaces paginator + list_objects_v2
+    blobs    = gcs.bucket(GCS_RAW_BUCKET).list_blobs(prefix=RAW_PREFIX)
+    all_keys = [
+        b.name for b in blobs
+        if b.name.endswith(".json") and "checkpoint" not in b.name
     ]
 
     if not all_keys:
@@ -221,8 +218,8 @@ def main():
 
     for key in pending_keys:
         try:
-            obj      = s3.get_object(Bucket=S3_RAW_BUCKET, Key=key)
-            event    = json.loads(obj["Body"].read())
+            blob     = gcs.bucket(GCS_RAW_BUCKET).blob(key)
+            event    = json.loads(blob.download_as_text())
             is_valid, failures = validate_event(event, suite, context)
             route_event(event, key, is_valid, failures)
             valid_count   += is_valid

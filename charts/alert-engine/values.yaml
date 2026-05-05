@@ -1,19 +1,18 @@
-# values.yaml — alert-engine chart
-
 config:
   dataset:           "FD002"
-  awsRegion:         "ap-southeast-1"
-  s3RawBucket:       "phm-raw-data"
-  rulAlertThreshold: "20"      # alert when RUL < 20 cycles
-  esHost:            "elasticsearch-svc"
-  esPort:            "9200"
-  esIndex:           "phm-alerts"
+  gcpProject:        "aide2-494008"
+  gcpRegion:         "us-central1"
+  gcsRawBucket:      "phm-raw-data-aide2-494008"
+  rulAlertThreshold: "20"
+  dbHost:            "10.72.1.3"
+  dbPort:            "5432"
+  dbName:            "phmdb"
+  dbUser:            "phmadmin"
 
-# Alert Rule Engine CronJob
 alertEngine:
-  schedule: "*/5 * * * *"    # runs every 5 min after model-serving writes results
+  schedule: "*/5 * * * *"
   image:
-    repository: 982215135701.dkr.ecr.ap-southeast-1.amazonaws.com/phm/alert-engine
+    repository: us-central1-docker.pkg.dev/aide2-494008/phm-alert-engine/alert-engine
     tag: latest
     pullPolicy: Always
   resources:
@@ -21,21 +20,10 @@ alertEngine:
       cpu:    "100m"
       memory: "128Mi"
     limits:
-      cpu:    "200m"
-      memory: "256Mi"
-
-# Elasticsearch — single node, no replicas (free tier)
-elasticsearch:
-  image:          "docker.elastic.co/elasticsearch/elasticsearch:8.12.0"
-  storageSize:    "5Gi"
-  resources:
-    requests:
-      cpu:    "100m"
-      memory: "128Mi"
-    limits:
-      cpu:    "200m"
+      cpu:    "300m"
       memory: "256Mi"
 
 serviceAccount:
   name: alert-engine-sa
-  irsaRoleArn: "arn:aws:iam::982215135701:role/phm-data-ingestion-irsa"
+  # Email from: terraform output workload_identity_annotations
+  gcpServiceAccount: "phm-alert-engine@aide2-494008.iam.gserviceaccount.com"

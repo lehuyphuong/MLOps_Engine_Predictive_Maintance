@@ -3,20 +3,20 @@
 # -------------------------------------------------------------------
 config:
   dataset:          "FD002"
-  awsRegion:        "ap-southeast-1"
-  s3RawBucket:      "phm-raw-data"
-  s3QualityBucket:  "phm-data-quality"
-  dataDir:          "/data/CMaps"
-  cyclesPerRun:     "50"          # rows emitted per producer trigger
-  s3DataKey: "cmapss-data/simulated_FD002.txt"
+  gcpProject:       "aide2-494008"
+  gcpRegion:        "us-central1"
+  gcsBucket:        "phm-raw-data-aide2-494008"
+  gcsQualityBucket: "phm-data-quality-aide2-494008"
+  cyclesPerRun:     "50"
+  gcsDataKey:       "cmapss-data/simulated_FD002.txt"
 
 # -------------------------------------------------------------------
 # Producer CronJob
 # -------------------------------------------------------------------
 producer:
-  schedule: "*/5 * * * *"         # every 5 min — adjust to control data flow rate
+  schedule: "*/5 * * * *"
   image:
-    repository: 982215135701.dkr.ecr.ap-southeast-1.amazonaws.com/phm/data-ingestion
+    repository: us-central1-docker.pkg.dev/aide2-494008/phm-data-ingestion/data-ingestion
     tag: latest
     pullPolicy: Always
   resources:
@@ -31,9 +31,9 @@ producer:
 # Validation Service CronJob
 # -------------------------------------------------------------------
 validator:
-  schedule: "2-57/5 * * * *"      # 2 min after producer on every 5-min mark
+  schedule: "2-57/5 * * * *"
   image:
-    repository: 982215135701.dkr.ecr.ap-southeast-1.amazonaws.com/phm/validation-service
+    repository: us-central1-docker.pkg.dev/aide2-494008/phm-validation-service/validation-service
     tag: latest
     pullPolicy: Always
   resources:
@@ -45,19 +45,9 @@ validator:
       memory: "256Mi"
 
 # -------------------------------------------------------------------
-# ServiceAccount / IRSA
+# ServiceAccount / Workload Identity
 # -------------------------------------------------------------------
 serviceAccount:
   name: data-ingestion-sa
-  # ARN from: terraform output irsa_role_data_ingestion
-  irsaRoleArn: "arn:aws:iam::982215135701:role/phm-data-ingestion-irsa"
-
-# -------------------------------------------------------------------
-# PersistentVolumeClaim for C-MAPSS data files or S3
-# -------------------------------------------------------------------
-# pvc:
-#   name: cmapss-data-pvc
-#   storage: 512Mi
-#   nodePath: /mnt/cmapss-data      # path on EKS worker node
-
-
+  # Email from: terraform output workload_identity_annotations
+  gcpServiceAccount: "phm-data-ingestion@aide2-494008.iam.gserviceaccount.com"

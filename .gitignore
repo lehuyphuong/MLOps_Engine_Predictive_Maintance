@@ -4,3 +4,7 @@
 *.tfstate.backup
 *.lock.hcl
 terraform.tfvars
+
+auth
+
+google-cloud-sdk/

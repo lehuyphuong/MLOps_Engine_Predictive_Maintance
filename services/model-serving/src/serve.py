@@ -9,7 +9,7 @@ Three components per diagram:
 
 Output per inference:
   engine_id · RUL · anomaly_score · anomaly_flag
-  Written to S3 for alert-naming namespace to consume.
+  Written to GCS for alert-naming namespace to consume.
 
 Endpoints:
   POST /infer/{unit_id}         -> full inference (RUL + anomaly)
@@ -18,14 +18,19 @@ Endpoints:
   GET  /health                  -> liveness probe
   GET  /model/info              -> loaded model versions
 
+  POST /trigger                 -> called by stream_processor after each batch
+                                   triggers inference for all active engine IDs
+                                   THIS FIXES the missing pipeline link between
+                                   feature-platform and model-serving
+
 Environment variables:
-  S3_ARTIFACTS_BUCKET     phm-model-artifacts
-  S3_RAW_BUCKET           phm-raw-data
-  REDIS_HOST              ElastiCache endpoint
+  GCS_ARTIFACTS_BUCKET    phm-model-artifacts-aide2-494008
+  GCS_RAW_BUCKET          phm-raw-data-aide2-494008
+  GCP_PROJECT             aide2-494008
+  REDIS_HOST              Memorystore endpoint
   REDIS_PORT              6379
   DATASET                 FD002
-  AWS_REGION              ap-southeast-1
-  WINDOW_SIZE             24
+  WINDOW_SIZE             30
   PORT                    8080
 """
 
@@ -34,16 +39,17 @@ import os
 import json
 import pickle
 import logging
-import boto3
 import redis
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 from fastapi import FastAPI, HTTPException
+from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
+from google.cloud import storage
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,18 +60,17 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-S3_ARTIFACTS_BUCKET = os.environ.get("S3_ARTIFACTS_BUCKET", "phm-model-artifacts")
-S3_RAW_BUCKET       = os.environ.get("S3_RAW_BUCKET",       "phm-raw-data")
-DATASET             = os.environ.get("DATASET",              "FD002")
-AWS_REGION          = os.environ.get("AWS_REGION",           "ap-southeast-1")
-REDIS_HOST          = os.environ.get("REDIS_HOST",           "localhost")
-REDIS_PORT          = int(os.environ.get("REDIS_PORT",       "6379"))
-WINDOW_SIZE         = int(os.environ.get("WINDOW_SIZE",      "24"))
+GCS_ARTIFACTS_BUCKET = os.environ.get("GCS_ARTIFACTS_BUCKET", "phm-model-artifacts-aide2-494008")
+GCS_RAW_BUCKET       = os.environ.get("GCS_RAW_BUCKET",       "phm-raw-data-aide2-494008")
+GCP_PROJECT          = os.environ.get("GCP_PROJECT",           "aide2-494008")
+DATASET              = os.environ.get("DATASET",               "FD002")
+REDIS_HOST           = os.environ.get("REDIS_HOST",            "localhost")
+REDIS_PORT           = int(os.environ.get("REDIS_PORT",        "6379"))
+WINDOW_SIZE          = int(os.environ.get("WINDOW_SIZE",       "30"))
 
 MANIFEST_KEY   = f"registry/{DATASET}/promotion_manifest.json"
 RESULTS_PREFIX = f"inference-results/{DATASET}/"
 
-# FD002 dropped columns — must match training
 COLS_TO_DROP = [
     "OperSet1", "OperSet2", "OperSet3",
     "SensorMes1", "SensorMes5", "SensorMes10",
@@ -73,7 +78,22 @@ COLS_TO_DROP = [
 ]
 
 DEVICE = torch.device("cpu")
-s3     = boto3.client("s3", region_name=AWS_REGION)
+
+# ---------------------------------------------------------------------------
+# GCS client  (replaces boto3.client("s3"))
+# ---------------------------------------------------------------------------
+gcs = storage.Client(project=GCP_PROJECT)
+
+
+def gcs_read_bytes(bucket: str, key: str) -> bytes:
+    return gcs.bucket(bucket).blob(key).download_as_bytes()
+
+
+def gcs_write_json(bucket: str, key: str, data: dict) -> None:
+    gcs.bucket(bucket).blob(key).upload_from_string(
+        json.dumps(data),
+        content_type="application/json",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +129,7 @@ class LSTMAutoEncoder(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# Model store — loads artifacts from S3 on startup
+# Model store — loads artifacts from GCS on startup
 # ---------------------------------------------------------------------------
 class ModelStore:
     def __init__(self):
@@ -124,17 +144,19 @@ class ModelStore:
         self.loaded_at         = None
 
     def load(self):
-        log.info("Loading promotion manifest from S3...")
-        obj           = s3.get_object(Bucket=S3_ARTIFACTS_BUCKET, Key=MANIFEST_KEY)
-        self.manifest = json.loads(obj["Body"].read())
+        log.info("Loading promotion manifest from GCS...")
+
+        # Load manifest  (replaces s3.get_object for manifest)
+        self.manifest = json.loads(
+            gcs_read_bytes(GCS_ARTIFACTS_BUCKET, MANIFEST_KEY)
+        )
         log.info(f"Manifest loaded — promoted_at={self.manifest['promoted_at']}")
 
-        # Load XGBoost RUL model
-        rul_key = self.manifest["rul_model"]["s3_uri"].replace(
-            f"s3://{S3_ARTIFACTS_BUCKET}/", ""
+        # Load XGBoost RUL model  (replaces s3.get_object for rul pkl)
+        rul_key = self.manifest["rul_model"]["gcs_uri"].replace(
+            f"gs://{GCS_ARTIFACTS_BUCKET}/", ""
         )
-        obj      = s3.get_object(Bucket=S3_ARTIFACTS_BUCKET, Key=rul_key)
-        artifact = pickle.loads(obj["Body"].read())
+        artifact        = pickle.loads(gcs_read_bytes(GCS_ARTIFACTS_BUCKET, rul_key))
         self.rul_model  = artifact["model"]
         self.rul_scaler = artifact["scaler"]
         log.info(
@@ -142,27 +164,21 @@ class ModelStore:
             f"RMSE={self.manifest['rul_model']['mean_rmse']:.4f}"
         )
 
-        # Load AutoEncoder anomaly artifacts
-        prefix  = self.manifest["anomaly_model"]["s3_uri"].replace(
-            f"s3://{S3_ARTIFACTS_BUCKET}/", ""
+        # Load AutoEncoder anomaly artifacts  (replaces two s3.get_object calls)
+        prefix = self.manifest["anomaly_model"]["gcs_uri"].replace(
+            f"gs://{GCS_ARTIFACTS_BUCKET}/", ""
         )
-        pkl_obj  = s3.get_object(
-            Bucket=S3_ARTIFACTS_BUCKET,
-            Key=f"{prefix}anomaly_artifacts.pkl"
+        pkl                    = pickle.loads(
+            gcs_read_bytes(GCS_ARTIFACTS_BUCKET, f"{prefix}anomaly_artifacts.pkl")
         )
-        pkl = pickle.loads(pkl_obj["Body"].read())
         self.anomaly_scalers   = pkl["scalers"]
         self.anomaly_threshold = pkl["threshold"]
         self.anomaly_seq_len   = pkl.get("seq_len", 30)
         self.n_features        = pkl["n_features"]
 
         # Load PyTorch weights
-        pt_obj  = s3.get_object(
-            Bucket=S3_ARTIFACTS_BUCKET,
-            Key=f"{prefix}autoencoder.pt"
-        )
         pt_data = torch.load(
-            io.BytesIO(pt_obj["Body"].read()),
+            io.BytesIO(gcs_read_bytes(GCS_ARTIFACTS_BUCKET, f"{prefix}autoencoder.pt")),
             map_location=DEVICE
         )
         ae = LSTMAutoEncoder(self.n_features, self.anomaly_seq_len)
@@ -193,47 +209,43 @@ class RedisStore:
         )
 
     def get_window(self, unit_id: int) -> list:
-        """
-        Get rolling 24-cycle window written by stream_processor.
-        Key  : engine:{unit_id}:window
-        Value: [{cycle, features}, ...]
-        """
         raw = self.r.get(f"engine:{unit_id}:window")
         return json.loads(raw) if raw else []
 
     def get_latest(self, unit_id: int) -> Optional[dict]:
-        """Get latest single cycle state."""
         raw = self.r.get(f"engine:{unit_id}:latest")
         return json.loads(raw) if raw else None
 
+    def get_all_active_engines(self) -> list[int]:
+        """
+        Scan Redis for all engine window keys and return their unit IDs.
+        Used by the /trigger endpoint to run inference for all active engines.
+        Pattern: engine:*:window
+        """
+        keys     = self.r.keys("engine:*:window")
+        unit_ids = []
+        for key in keys:
+            try:
+                # key format: engine:{unit_id}:window
+                unit_ids.append(int(key.split(":")[1]))
+            except (IndexError, ValueError):
+                pass
+        return sorted(unit_ids)
+
 
 # ---------------------------------------------------------------------------
-# RUL Prediction Model
-# 24-cycle sequence input from Redis window -> predicted_RUL_cycles
+# RUL Prediction — unchanged logic from original
 # ---------------------------------------------------------------------------
 def infer_rul(model_store: ModelStore, window: list) -> Optional[float]:
-    """
-    RUL Prediction Model.
-    Input : last WINDOW_SIZE cycles from Redis (written by feature-platform)
-    Output: predicted_RUL_cycles
-    Returns None if insufficient window data.
-    """
     if len(window) < WINDOW_SIZE:
-        log.debug(f"Insufficient window {len(window)} < {WINDOW_SIZE}")
         return None
 
-    # Use most recent cycle features
     latest   = window[-1]
     features = latest["features"]
     cycle    = latest["cycle"]
+    clean    = {k: v for k, v in features.items() if k not in COLS_TO_DROP}
+    df       = pd.DataFrame([{"UnitNumber": 0, "TimeInCycles": cycle, **clean}])
 
-    # Drop low-correlation columns
-    clean = {k: v for k, v in features.items() if k not in COLS_TO_DROP}
-
-    # Build DataFrame matching training format
-    df = pd.DataFrame([{"UnitNumber": 0, "TimeInCycles": cycle, **clean}])
-
-    # Apply MinMaxScaler from training artifact
     try:
         df_scaled = pd.DataFrame(
             model_store.rul_scaler.transform(df),
@@ -243,38 +255,29 @@ def infer_rul(model_store: ModelStore, window: list) -> Optional[float]:
         log.warning(f"Scaler error — using raw features: {e}")
         df_scaled = df.copy()
 
-    X   = df_scaled.drop(columns=["UnitNumber", "TimeInCycles"], errors="ignore")
+    # Drop only RUL — UnitNumber and TimeInCycles must stay.
+    # XGBoost was trained on the full scaled DataFrame including those columns
+    # (train_RUL.py calls scaler.fit_transform(train) before the X/Y split,
+    # so the booster's feature list includes UnitNumber and TimeInCycles).
+    X   = df_scaled.drop(columns=["RUL"], errors="ignore")
     rul = float(model_store.rul_model.predict(X)[0])
     return max(0.0, rul)
 
 
 # ---------------------------------------------------------------------------
-# Anomaly Detection Model
-# Latest sensor => anomaly_score, anomaly_flag (HPC / fan fault modes)
+# Anomaly Detection — unchanged logic from original
 # ---------------------------------------------------------------------------
-def infer_anomaly(
-    model_store: ModelStore,
-    window: list,
-) -> tuple[float, bool]:
-    """
-    Anomaly Detection Model.
-    Input : latest sensor readings via LSTM context window
-    Output: anomaly_score (reconstruction error), anomaly_flag
-    """
+def infer_anomaly(model_store: ModelStore,
+                  window: list) -> tuple[float, bool]:
     seq_len = model_store.anomaly_seq_len
-
     if len(window) < seq_len:
         return 0.0, False
 
     recent = window[-seq_len:]
     try:
         seq = np.array(
-            [
-                [
-                    list(entry["features"].values())[:model_store.n_features]
-                    for entry in recent
-                ]
-            ],
+            [[list(e["features"].values())[:model_store.n_features]
+              for e in recent]],
             dtype=np.float32,
         )
     except Exception as e:
@@ -286,22 +289,16 @@ def infer_anomaly(
         recon  = model_store.anomaly_model(tensor)
         error  = float(torch.mean((tensor - recon) ** 2).item())
 
-    anomaly_flag = error > model_store.anomaly_threshold
-    return error, anomaly_flag
+    return error, error > model_store.anomaly_threshold
 
 
 # ---------------------------------------------------------------------------
-# Write inference result to S3 for alert-naming namespace
+# Write inference result to GCS  (replaces s3.put_object)
 # ---------------------------------------------------------------------------
 def write_result(result: dict) -> None:
     ts  = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
     key = f"{RESULTS_PREFIX}unit_{result['engine_id']:03d}/{ts}.json"
-    s3.put_object(
-        Bucket=S3_RAW_BUCKET,
-        Key=key,
-        Body=json.dumps(result),
-        ContentType="application/json",
-    )
+    gcs_write_json(GCS_RAW_BUCKET, key, result)
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +307,11 @@ def write_result(result: dict) -> None:
 app         = FastAPI(title="PHM Inference Orchestrator", version="1.0.0")
 model_store = ModelStore()
 redis_store: Optional[RedisStore] = None
+
+# Expose /metrics endpoint for Prometheus scraping.
+# Automatically tracks: request count, latency histograms, error rates
+# per endpoint and HTTP method. Scraped by Prometheus every 15s.
+Instrumentator().instrument(app).expose(app)
 
 
 @app.on_event("startup")
@@ -325,6 +327,11 @@ async def startup():
 # ---------------------------------------------------------------------------
 class InferRequest(BaseModel):
     cycle: int
+
+
+class TriggerRequest(BaseModel):
+    cycle: int
+    unit_ids: Optional[list[int]] = None   # if None, infer all active engines
 
 
 class InferResponse(BaseModel):
@@ -372,7 +379,7 @@ def infer(unit_id: int, req: InferRequest):
     """
     Inference Orchestrator — triggered per cycle event.
     Reads 24-cycle window from Redis written by feature-platform.
-    Runs RUL Prediction + Anomaly Detection in parallel.
+    Runs RUL Prediction + Anomaly Detection.
     Output: engine_id · RUL · anomaly_score · anomaly_flag
     """
     if model_store.rul_model is None:
@@ -388,10 +395,7 @@ def infer(unit_id: int, req: InferRequest):
             ),
         )
 
-    # RUL Prediction Model — 24-cycle sequence input
-    rul = infer_rul(model_store, window)
-
-    # Anomaly Detection Model — latest sensor => anomaly_score
+    rul                       = infer_rul(model_store, window)
     anomaly_score, anomaly_flag = infer_anomaly(model_store, window)
 
     result = {
@@ -403,11 +407,10 @@ def infer(unit_id: int, req: InferRequest):
         "timestamp":     datetime.now(timezone.utc).isoformat(),
     }
 
-    # Write to S3 — alert-naming namespace polls this prefix
     try:
         write_result(result)
     except Exception as e:
-        log.warning(f"S3 write failed: {e}")
+        log.warning(f"GCS write failed: {e}")
 
     log.info(
         f"Engine {unit_id} cycle {req.cycle} — "
@@ -415,7 +418,6 @@ def infer(unit_id: int, req: InferRequest):
         f"anomaly_flag={anomaly_flag} "
         f"score={anomaly_score:.4f}"
     )
-
     return InferResponse(**result)
 
 
@@ -424,10 +426,8 @@ def infer_rul_only(unit_id: int, req: InferRequest):
     """RUL Prediction Model — 24-cycle sequence input."""
     window = redis_store.get_window(unit_id)
     if not window:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No window for engine {unit_id}"
-        )
+        raise HTTPException(status_code=404,
+                            detail=f"No window for engine {unit_id}")
     rul = infer_rul(model_store, window)
     return {
         "engine_id": unit_id,
@@ -442,10 +442,8 @@ def infer_anomaly_only(unit_id: int, req: InferRequest):
     """Anomaly Detection Model — latest sensor => anomaly_score."""
     window = redis_store.get_window(unit_id)
     if not window:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No window for engine {unit_id}"
-        )
+        raise HTTPException(status_code=404,
+                            detail=f"No window for engine {unit_id}")
     anomaly_score, anomaly_flag = infer_anomaly(model_store, window)
     return {
         "engine_id":     unit_id,
@@ -454,4 +452,77 @@ def infer_anomaly_only(unit_id: int, req: InferRequest):
         "anomaly_flag":  anomaly_flag,
         "threshold":     model_store.anomaly_threshold,
         "timestamp":     datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.post("/trigger")
+def trigger_batch(req: TriggerRequest):
+    """
+    Batch trigger endpoint — fixes the missing pipeline link.
+
+    Called by stream_processor.py at the end of each CronJob run after
+    writing features to Redis. Runs inference for all active engines
+    (or a specified subset) in a single HTTP call.
+
+    stream_processor adds this at the end of main():
+      import requests
+      requests.post(
+          "http://model-serving-svc:80/trigger",
+          json={"cycle": current_cycle},
+          timeout=30,
+      )
+    """
+    if model_store.rul_model is None:
+        raise HTTPException(status_code=503, detail="Models not loaded")
+
+    # Use provided unit_ids or discover all active engines from Redis
+    unit_ids = req.unit_ids or redis_store.get_all_active_engines()
+
+    if not unit_ids:
+        return {"triggered": 0, "message": "No active engines in Redis"}
+
+    results      = []
+    errors       = []
+    current_cycle = req.cycle
+
+    for unit_id in unit_ids:
+        try:
+            window = redis_store.get_window(unit_id)
+            if not window:
+                continue
+
+            rul                         = infer_rul(model_store, window)
+            anomaly_score, anomaly_flag = infer_anomaly(model_store, window)
+
+            result = {
+                "engine_id":     unit_id,
+                "cycle":         current_cycle,
+                "RUL":           round(rul, 2) if rul is not None else None,
+                "anomaly_score": round(anomaly_score, 6),
+                "anomaly_flag":  bool(anomaly_flag),
+                "timestamp":     datetime.now(timezone.utc).isoformat(),
+            }
+
+            try:
+                write_result(result)
+            except Exception as e:
+                log.warning(f"GCS write failed for engine {unit_id}: {e}")
+
+            results.append(result)
+
+            log.info(
+                f"[trigger] Engine {unit_id} cycle {current_cycle} — "
+                f"RUL={result['RUL']} anomaly={anomaly_flag} "
+                f"score={anomaly_score:.4f}"
+            )
+
+        except Exception as e:
+            log.error(f"[trigger] Engine {unit_id} failed: {e}")
+            errors.append({"unit_id": unit_id, "error": str(e)})
+
+    return {
+        "triggered":  len(results),
+        "errors":     len(errors),
+        "cycle":      current_cycle,
+        "unit_ids":   [r["engine_id"] for r in results],
     }

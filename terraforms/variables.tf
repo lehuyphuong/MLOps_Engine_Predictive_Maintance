@@ -1,104 +1,134 @@
-# -------------------------------
+# ---------------------------------------------------------------
 # Project / Location
-# -------------------------------
+# ---------------------------------------------------------------
+
+variable "project_id" {
+  type        = string
+  description = "GCP project ID"
+  default     = "aide2-494008"
+}
 
 variable "project" {
   type        = string
-  description = "Short project prefix applied to every resource name"
+  description = "Short prefix applied to every resource name"
   default     = "phm"
 }
 
-variable "aws_region" {
+variable "region" {
   type        = string
-  description = "AWS region"
-  default     = "ap-southeast-1"
+  description = "GCP region for all resources"
+  default     = "us-central1"
 }
 
-# -------------------------------
+# ---------------------------------------------------------------
 # Networking
-# -------------------------------
+# ---------------------------------------------------------------
 
-variable "vpc_cidr" {
+variable "subnet_ip_cidr" {
   type        = string
-  description = "CIDR block for the VPC"
-  default     = "10.10.0.0/16"
+  description = "Primary CIDR for GKE nodes"
+  default     = "10.10.0.0/20"
 }
 
-variable "availability_zone" {
+variable "pods_secondary_range_name" {
   type        = string
-  description = "Primary AZ — keeps EKS and Redis in one zone to avoid cross-AZ transfer costs"
-  default     = "ap-southeast-1a"
+  description = "Secondary IP range name for Pods"
+  default     = "gke-pods"
 }
 
-variable "rds_availability_zone" {
+variable "pods_ip_cidr" {
   type        = string
-  description = "Second AZ used only for the RDS subnet group (AWS requires minimum 2 AZs)"
-  default     = "ap-southeast-1b"
+  description = "CIDR range for Pods"
+  default     = "10.20.0.0/16"
 }
 
-variable "public_subnet_cidr" {
+variable "services_secondary_range_name" {
   type        = string
-  description = "CIDR for the public subnet (EKS API LB)"
-  default     = "10.10.1.0/24"
+  description = "Secondary IP range name for Services"
+  default     = "gke-services"
 }
 
-variable "private_subnet_cidr" {
+variable "services_ip_cidr" {
   type        = string
-  description = "CIDR for the private subnet (EKS worker node, RDS, Redis)"
-  default     = "10.10.2.0/24"
+  description = "CIDR range for Services"
+  default     = "10.30.0.0/20"
 }
 
-# -------------------------------
-# EKS cluster
-# -------------------------------
+variable "master_ipv4_cidr_block" {
+  type        = string
+  description = "Private CIDR for the GKE control plane (must not overlap node or pod ranges)"
+  default     = "172.16.0.0/28"
+}
+
+# ---------------------------------------------------------------
+# GKE cluster
+# ---------------------------------------------------------------
 
 variable "cluster_name" {
   type        = string
-  description = "Name of the EKS cluster"
-  default     = "eks-phm"
+  description = "Name of the GKE cluster"
+  default     = "gke-phm"
 }
 
-variable "kubernetes_version" {
+variable "release_channel" {
   type        = string
-  description = "Kubernetes version for EKS"
-  default     = "1.29"
+  description = "GKE release channel (RAPID, REGULAR, STABLE)"
+  default     = "REGULAR"
 }
 
-# -------------------------------
-# Node group sizing / type
-# -------------------------------
+variable "node_locations" {
+  type        = list(string)
+  description = "Zones where GKE nodes run (single zone keeps costs low for dev)"
+  default     = ["us-central1-a"]
+}
 
-variable "node_instance_type" {
+# ---------------------------------------------------------------
+# Node pool
+# ---------------------------------------------------------------
+
+variable "machine_type" {
   type        = string
-  description = "EC2 instance type — t3.medium: 2 vCPU, 4 GB RAM, free-tier eligible"
-  default     = "t3.small"
+  description = "GCE machine type for GKE nodes — e2-standard-4: 4 vCPU, 16 GB RAM"
+  default     = "e2-standard-4"
 }
 
-variable "node_count" {
+variable "node_min_count" {
   type        = number
-  description = "Fixed number of worker nodes — no auto-scaling"
+  description = "Minimum nodes in the primary pool"
   default     = 1
+}
+
+variable "node_max_count" {
+  type        = number
+  description = "Maximum nodes in the primary pool"
+  default     = 2
 }
 
 variable "node_disk_size_gb" {
   type        = number
-  description = "EBS root volume size per node in GiB"
-  default     = 20
+  description = "Boot disk size per node in GB"
+  default     = 50
 }
 
-# -------------------------------
-# RDS PostgreSQL (feature store + MLflow backend)
-# -------------------------------
-
-variable "db_instance_class" {
+variable "node_disk_type" {
   type        = string
-  description = "RDS instance class — db.t3.micro is free-tier eligible"
-  default     = "db.t3.micro"
+  description = "Boot disk type (pd-standard, pd-balanced, pd-ssd)"
+  default     = "pd-balanced"
 }
 
-variable "db_allocated_storage" {
+# ---------------------------------------------------------------
+# Cloud SQL — PostgreSQL
+# ---------------------------------------------------------------
+
+variable "db_tier" {
+  type        = string
+  description = "Cloud SQL machine tier — db-f1-micro (0.6 GB) for dev, db-g1-small (1.7 GB) for more headroom"
+  default     = "db-g1-small"
+}
+
+variable "db_disk_size_gb" {
   type        = number
-  description = "Allocated storage in GiB — 20 GiB is within free-tier limit"
+  description = "Cloud SQL disk size in GB"
   default     = 20
 }
 
@@ -110,26 +140,26 @@ variable "db_name" {
 
 variable "db_username" {
   type        = string
-  description = "Master username for RDS"
+  description = "PostgreSQL master username"
   default     = "phmadmin"
 }
 
-# -------------------------------
-# ElastiCache Redis (online feature store)
-# -------------------------------
+# ---------------------------------------------------------------
+# Memorystore Redis
+# ---------------------------------------------------------------
 
-variable "redis_node_type" {
-  type        = string
-  description = "ElastiCache node type — cache.t3.micro is the smallest available"
-  default     = "cache.t3.micro"
+variable "redis_memory_size_gb" {
+  type        = number
+  description = "Redis instance memory in GB — 1 GB is sufficient for the 24-cycle feature window"
+  default     = 1
 }
 
-# -------------------------------
-# S3
-# -------------------------------
+# ---------------------------------------------------------------
+# GCS
+# ---------------------------------------------------------------
 
-variable "s3_force_destroy" {
+variable "gcs_force_destroy" {
   type        = bool
-  description = "Allow terraform destroy to delete non-empty buckets (safe for dev)"
+  description = "Allow terraform destroy to delete non-empty GCS buckets (safe for dev)"
   default     = true
 }

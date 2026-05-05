@@ -5,9 +5,10 @@ metadata:
   namespace: model-serving
 data:
   DATASET:                {{ .Values.config.dataset | quote }}
-  AWS_REGION:             {{ .Values.config.awsRegion | quote }}
-  S3_ARTIFACTS_BUCKET:    {{ .Values.config.s3ArtifactsBucket | quote }}
-  S3_RAW_BUCKET:          {{ .Values.config.s3RawBucket | quote }}
+  GCP_PROJECT:            {{ .Values.config.gcpProject | quote }}
+  GCP_REGION:             {{ .Values.config.gcpRegion | quote }}
+  GCS_ARTIFACTS_BUCKET:   {{ .Values.config.gcsArtifactsBucket | quote }}
+  GCS_RAW_BUCKET:         {{ .Values.config.gcsRawBucket | quote }}
   ANOMALY_MIN_CYCLES:     {{ .Values.config.anomalyMinCycles | quote }}
   CV_STABILITY_THRESHOLD: {{ .Values.config.cvStabilityThreshold | quote }}
   REDIS_HOST:             {{ .Values.redis.host | quote }}

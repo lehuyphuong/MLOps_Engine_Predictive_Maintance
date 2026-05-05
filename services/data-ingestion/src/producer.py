@@ -1,28 +1,28 @@
 """
 producer.py — Telemetry Producer
-Reads simulated_FD002.txt from S3 row by row and publishes each cycle
-as a JSON event to S3 (s3://phm-raw-data/raw_engine_cycles/<dataset>/...).
+Reads simulated_FD002.txt from GCS row by row and publishes each cycle
+as a JSON event to GCS (gs://phm-raw-data-.../raw_engine_cycles/<dataset>/...).
 
 Runs as a Kubernetes CronJob. On each trigger it picks up from the last
-recorded cycle (stored in a checkpoint file on S3) so it never re-sends
+recorded cycle (stored in a checkpoint file on GCS) so it never re-sends
 the same row twice.
 
 Environment variables (set in configmap.yaml):
-  S3_BUCKET       raw data bucket       (phm-raw-data)
-  S3_DATA_KEY     path to source file   (cmapss-data/simulated_FD002.txt)
+  GCS_BUCKET      raw data bucket       (phm-raw-data-aide2-494008)
+  GCS_DATA_KEY    path to source file   (cmapss-data/simulated_FD002.txt)
   DATASET         sub-dataset label     (FD002)
   CYCLES_PER_RUN  rows per CronJob run  (default: 50)
-  AWS_REGION      ap-southeast-1
+  GCP_PROJECT     aide2-494008
 """
 
 import io
 import os
 import json
 import logging
-import boto3
 import pandas as pd
 from datetime import datetime, timezone
-from botocore.exceptions import ClientError
+from google.cloud import storage
+from google.cloud.exceptions import NotFound
 
 # ---------------------------------------------------------------------------
 # Config
@@ -33,11 +33,11 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-S3_BUCKET      = os.environ.get("S3_BUCKET",      "phm-raw-data")
+GCS_BUCKET     = os.environ.get("GCS_BUCKET",     "phm-raw-data-aide2-494008")
 DATASET        = os.environ.get("DATASET",         "FD002")
 CYCLES_PER_RUN = int(os.environ.get("CYCLES_PER_RUN", "50"))
-AWS_REGION     = os.environ.get("AWS_REGION",      "ap-southeast-1")
-S3_DATA_KEY    = os.environ.get("S3_DATA_KEY",     f"cmapss-data/simulated_{DATASET}.txt")
+GCP_PROJECT    = os.environ.get("GCP_PROJECT",     "aide2-494008")
+GCS_DATA_KEY   = os.environ.get("GCS_DATA_KEY",    f"cmapss-data/simulated_{DATASET}.txt")
 
 CHECKPOINT_KEY = f"checkpoints/{DATASET}/last_row.json"
 
@@ -48,22 +48,23 @@ COLUMN_NAMES = (
 )
 
 # ---------------------------------------------------------------------------
-# S3 helpers
+# GCS client
 # ---------------------------------------------------------------------------
-s3 = boto3.client("s3", region_name=AWS_REGION)
+gcs = storage.Client(project=GCP_PROJECT)
 
 
 def load_dataframe() -> pd.DataFrame:
-    """Read the simulated source file directly from S3."""
-    log.info(f"Loading s3://{S3_BUCKET}/{S3_DATA_KEY}")
-    obj = s3.get_object(Bucket=S3_BUCKET, Key=S3_DATA_KEY)
-    df  = pd.read_csv(
-        io.BytesIO(obj["Body"].read()),
+    """Read the simulated source file directly from GCS."""
+    log.info(f"Loading gs://{GCS_BUCKET}/{GCS_DATA_KEY}")
+    blob = gcs.bucket(GCS_BUCKET).blob(GCS_DATA_KEY)
+    data = blob.download_as_bytes()
+    df   = pd.read_csv(
+        io.BytesIO(data),
         sep=r"\s+",
         header=None,
         names=COLUMN_NAMES,
     )
-    log.info(f"Loaded {len(df)} rows from s3://{S3_BUCKET}/{S3_DATA_KEY}")
+    log.info(f"Loaded {len(df)} rows from gs://{GCS_BUCKET}/{GCS_DATA_KEY}")
     return df
 
 
@@ -71,16 +72,14 @@ def load_checkpoint() -> int:
     """Return the index of the last row that was successfully emitted.
     Returns -1 if no checkpoint exists (fresh start)."""
     try:
-        obj  = s3.get_object(Bucket=S3_BUCKET, Key=CHECKPOINT_KEY)
-        data = json.loads(obj["Body"].read())
+        blob = gcs.bucket(GCS_BUCKET).blob(CHECKPOINT_KEY)
+        data = json.loads(blob.download_as_text())
         last = data.get("last_row_index", -1)
         log.info(f"Checkpoint loaded — last emitted row index: {last}")
         return last
-    except ClientError as e:
-        if e.response["Error"]["Code"] == "NoSuchKey":
-            log.info("No checkpoint found — starting from row 0")
-            return -1
-        raise
+    except NotFound:
+        log.info("No checkpoint found — starting from row 0")
+        return -1
 
 
 def save_checkpoint(last_row_index: int) -> None:
@@ -89,17 +88,16 @@ def save_checkpoint(last_row_index: int) -> None:
         "dataset":        DATASET,
         "updated_at":     datetime.now(timezone.utc).isoformat(),
     }
-    s3.put_object(
-        Bucket=S3_BUCKET,
-        Key=CHECKPOINT_KEY,
-        Body=json.dumps(payload),
-        ContentType="application/json",
+    blob = gcs.bucket(GCS_BUCKET).blob(CHECKPOINT_KEY)
+    blob.upload_from_string(
+        json.dumps(payload),
+        content_type="application/json",
     )
     log.info(f"Checkpoint saved — last row index: {last_row_index}")
 
 
 def emit_cycle(row: dict, row_index: int) -> None:
-    """Write a single cycle event as JSON to S3."""
+    """Write a single cycle event as JSON to GCS."""
     unit  = row["UnitNumber"]
     cycle = row["TimeInCycles"]
     ts    = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
@@ -119,13 +117,13 @@ def emit_cycle(row: dict, row_index: int) -> None:
 
     unit = int(unit)
     key  = f"raw_engine_cycles/{DATASET}/unit_{unit:03d}/{ts}_{row_index}.json"
-    s3.put_object(
-        Bucket=S3_BUCKET,
-        Key=key,
-        Body=json.dumps(event),
-        ContentType="application/json",
+
+    blob = gcs.bucket(GCS_BUCKET).blob(key)
+    blob.upload_from_string(
+        json.dumps(event),
+        content_type="application/json",
     )
-    log.debug(f"Emitted unit={unit} cycle={cycle} -> s3://{S3_BUCKET}/{key}")
+    log.debug(f"Emitted unit={unit} cycle={cycle} -> gs://{GCS_BUCKET}/{key}")
 
 
 # ---------------------------------------------------------------------------
