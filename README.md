@@ -747,6 +747,14 @@ cd ..
 2. Run Jenkins:
 
 ```bash
+# Check the current group ID of the docker socket on your host
+ls -la /var/run/docker.sock
+# Example output: srw-rw---- 1 root docker 0 May 6 15:00 /var/run/docker.sock
+
+# Get the docker group ID on the host
+getent group docker
+# Example output: docker:x:998:phuong
+
 docker run -d \
   --name jenkins \
   --restart unless-stopped \
@@ -754,6 +762,7 @@ docker run -d \
   -p 50000:50000 \
   -v jenkins-data:/var/jenkins_home \
   -v /var/run/docker.sock:/var/run/docker.sock \
+  --group-add 998 \
   phm-jenkins
 ```
 
