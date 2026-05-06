@@ -8,3 +8,5 @@ terraform.tfvars
 auth
 
 google-cloud-sdk/
+
+jenkins-gke.json

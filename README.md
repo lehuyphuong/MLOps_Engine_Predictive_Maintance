@@ -778,7 +778,31 @@ docker exec jenkins \
    - Kind: Secret file
    - ID: `gcp-sa-key`
    - File: your GCP service account JSON key
+```bash
+gcloud iam service-accounts create jenkins-deployer \
+  --display-name "Jenkins GKE Deployer" \
+  --project aide2-494008
+  
+# Grant required IAM roles
+# Push images to Artifact Registry
+gcloud projects add-iam-policy-binding aide2-494008 \
+  --member="serviceAccount:jenkins-deployer@aide2-494008.iam.gserviceaccount.com" \
+  --role="roles/artifactregistry.writer"
 
+# Deploy to GKE
+gcloud projects add-iam-policy-binding aide2-494008 \
+  --member="serviceAccount:jenkins-deployer@aide2-494008.iam.gserviceaccount.com" \
+  --role="roles/container.developer"
+
+# Read GKE cluster credentials
+gcloud projects add-iam-policy-binding aide2-494008 \
+  --member="serviceAccount:jenkins-deployer@aide2-494008.iam.gserviceaccount.com" \
+  --role="roles/container.clusterViewer"
+  
+# Generate the key file (do not commit this file)
+gcloud iam service-accounts keys create jenkins-gke.json \
+  --iam-account jenkins-deployer@aide2-494008.iam.gserviceaccount.com
+```
 5. Create a Pipeline job pointing at this repository with Script Path set to `Jenkinsfile`. The pipeline runs 7 stages: Checkout, Unit Test (70% coverage gate), Authenticate to GCP, Build Image, Push Image, Helm Dependency Build, and Deploy. The deployment is blocked if any unit test fails or coverage falls below 70%.
 
 ---
