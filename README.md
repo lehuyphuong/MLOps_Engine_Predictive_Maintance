@@ -589,6 +589,10 @@ kubectl run pg-check --image=postgres:15 -n alert-naming --rm -it \
      -c "SELECT alert_type, severity, engine_id, rul, message FROM alerts ORDER BY indexed_at DESC LIMIT 10;"
 ```
 
+- Output of alert-naming namespace  
+![](assets/imgs/alert-naming_namespace_pods.png)  
+
+
 ---
 
 ### Step 10: Deploy dashboard and ingress-nginx Namespaces
@@ -640,6 +644,9 @@ kubectl get pods -n dashboard -w
 ```
 
 3. First login: open `http://PUBLIC_IP/grafana`, username `admin`, password `admin`. Grafana forces a password change on first login. The new password is persisted in the PVC and survives pod restarts.
+
+- Output of alert-naming namespace  
+![](assets/imgs/dashboard_namespace_pods.png)  
 
 ---
 
@@ -748,6 +755,12 @@ echo "Prometheus UI:      http://${DEV_IP}/prometheus"
 
 First login: username `admin`, password `admin`. Grafana forces a password change on first login. The new password is persisted in the PVC.
 
+- Output of monitoring namespace  
+![](assets/imgs/monitoring_namespace_pods.png)  
+
+- monitoring UI
+![](assets/imgs/monitoring_UI.png)  
+
 ---
 
 ### Step 12: Deploy Jenkins Locally
@@ -795,6 +808,7 @@ docker exec jenkins \
    - Kind: Secret file
    - ID: `gcp-sa-key`
    - File: your GCP service account JSON key
+
 ```bash
 gcloud iam service-accounts create jenkins-deployer \
   --display-name "Jenkins GKE Deployer" \
@@ -820,6 +834,7 @@ gcloud projects add-iam-policy-binding aide2-494008 \
 gcloud iam service-accounts keys create jenkins-gke.json \
   --iam-account jenkins-deployer@aide2-494008.iam.gserviceaccount.com
 ```
+
 5. Create a Pipeline job pointing at this repository with Script Path set to `Jenkinsfile`. The pipeline runs 7 stages: Checkout, Unit Test (70% coverage gate), Authenticate to GCP, Build Image, Push Image, Helm Dependency Build, and Deploy. The deployment is blocked if any unit test fails or coverage falls below 70%.
 
 ---
@@ -853,12 +868,15 @@ cat > /tmp/bad_event.json << 'EOF'
 EOF
 
 gsutil cp /tmp/bad_event.json \
-  gs://phm-raw-data-aide2-494008/raw_engine_cycles/FD002/unit_999/20260503T000000000000_99999.json
+  gs://phm-raw-data-aide2-494008/raw_engine_cycles/FD002/unit_999/$(date +%Y%m%dT%H%M%S%6N)_99999.json
 
 # Trigger validation service manually to process it immediately
 kubectl create job --from=cronjob/validation-service test-val -n data-ingestion
 kubectl logs -n data-ingestion -l job-name=test-val -f
 ```
+
+- Output of log    
+![](assets/imgs/simulate_bad_event_to_validate.png)  
 
 ---
 
@@ -894,6 +912,9 @@ kubectl logs -n alert-naming -l job-name=demo-anomaly -f
 
 The Grafana Anomaly Score panel in the dashboard namespace queries `alert_type = 'anomaly_detected'` and will display engine 999 within the next 30-second refresh.
 
+- Output of log    
+![](assets/imgs/simulate_bad_event_to_trigger_alert_for_dashboard.png)  
+
 ---
 
 ### Simulate an Email Alert
@@ -910,6 +931,9 @@ kubectl logs -n alert-naming -l job-name=test-notify -f
 ```
 
 Emails arrive in the spam folder for SendGrid trial accounts without domain authentication. Mark them as not spam to train Gmail. In a production deployment, configure Domain Authentication (DMARC/SPF/DKIM) in the SendGrid sender authentication settings to ensure inbox delivery.
+
+- Output of log    
+![](assets/imgs/mail_alert.png) 
 
 ---
 
