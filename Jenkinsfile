@@ -127,12 +127,6 @@ pipeline {
         stage("Build Image") {
             steps {
                 sh '''
-                g   cloud auth print-access-token | docker login \
-                        -u oauth2accesstoken \
-                        --password-stdin \
-                        us-central1-docker.pkg.dev
-                        set -e
-                        
                     cd services/model-serving
                     docker build \
                         -t ${IMAGE_REPO}:${IMAGE_TAG} \

@@ -623,16 +623,6 @@ kubectl get pods -n dashboard -w
 
 3. First login: open `http://PUBLIC_IP/grafana`, username `admin`, password `admin`. Grafana forces a password change on first login. The new password is persisted in the PVC and survives pod restarts.
 
-Note: always let `helm install` create the namespace. Do not run `kubectl create namespace` first, as this causes Helm annotation conflicts. If you encounter this error:
-
-```bash
-kubectl label namespace dashboard \
-  app.kubernetes.io/managed-by=Helm
-kubectl annotate namespace dashboard \
-  meta.helm.sh/release-name=dashboard \
-  meta.helm.sh/release-namespace=dashboard
-```
-
 ---
 
 ### Step 11: Deploy monitoring Namespace
