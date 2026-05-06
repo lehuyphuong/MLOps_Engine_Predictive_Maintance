@@ -155,7 +155,6 @@ pipeline {
         stage("Helm Dependency Build") {
             steps {
                 sh '''
-                    cd ../..
                     set -e
                     helm dependency build ${HELM_CHART}
                 '''

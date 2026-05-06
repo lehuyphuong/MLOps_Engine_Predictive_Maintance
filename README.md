@@ -1,6 +1,9 @@
 # MLOps Engine Predictive Maintenance
 
 ## Overview
+<p align="center">
+  <img src="assets/imgs/MLOps_Predictive_Maintenance_Analysis.drawio.png" alt="Description" />
+</p>
 
 <!-- Architecture diagram placeholder -->
 
@@ -320,6 +323,9 @@ kubectl logs -n data-ingestion -l app=validation-service -f
 kubectl delete jobs --all -n data-ingestion
 ```
 
+- Output of data-ingestion namespace  
+![](assets/imgs/data-ingestion_namespace_pods.png)  
+
 ---
 
 ### Step 6: Deploy feature-platform Namespace
@@ -371,6 +377,9 @@ kubectl run pg-client --image=postgres:15 -n feature-platform --rm -it \
      -U phmadmin -d phmdb \
      -c "SELECT dataset, unit_id, cycle FROM engine_features LIMIT 5;"
 ```
+
+- Output of feature-platform namespace  
+![](assets/imgs/feature-platform_namespace_pods.png)  
 
 ---
 
@@ -426,6 +435,9 @@ kubectl logs -n model-training -l app=model-registry -f
 gsutil ls -r gs://phm-model-artifacts-aide2-494008/
 ```
 
+- Output of model-training namespace  
+![](assets/imgs/model-training_namespace_pods.png)  
+
 5. Optional: access MLflow UI:
 
 ```bash
@@ -456,6 +468,9 @@ subprocess.run([
 kubectl port-forward pod/mlflow-ui 5000:5000 -n model-training
 # Open: http://localhost:5000
 ```
+
+- MLflow UI screnshot
+![](assets/imgs/MLflow_UI.png)  
 
 ---
 
@@ -511,6 +526,9 @@ kubectl run curl-test --image=curlimages/curl -n model-serving --rm -it \
 # Verify results in GCS
 gsutil ls -r gs://phm-raw-data-aide2-494008/inference-results/FD002/
 ```
+
+- Output of model-serving namespace  
+![](assets/imgs/model-serving_namespace_pods.png)  
 
 ---
 
