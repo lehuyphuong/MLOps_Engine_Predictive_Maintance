@@ -4,15 +4,20 @@ metadata:
   name: feature-platform-config
   namespace: feature-platform
 data:
-  DATASET:        {{ .Values.config.dataset | quote }}
-  GCP_PROJECT:    {{ .Values.config.gcpProject | quote }}
-  GCP_REGION:     {{ .Values.config.gcpRegion | quote }}
-  GCS_RAW_BUCKET: {{ .Values.config.gcsBucket | quote }}
-  WINDOW_SIZE:    {{ .Values.config.windowSize | quote }}
-  RUL_CAP:        {{ .Values.config.rulCap | quote }}
-  REDIS_HOST:     {{ .Values.redis.host | quote }}
-  REDIS_PORT:     {{ .Values.redis.port | quote }}
-  DB_HOST:        {{ .Values.postgres.host | quote }}
-  DB_PORT:        {{ .Values.postgres.port | quote }}
-  DB_NAME:        {{ .Values.postgres.database | quote }}
-  DB_USER:        {{ .Values.postgres.username | quote }}
+  DATASET:                {{ .Values.config.dataset | quote }}
+  GCP_PROJECT:            {{ .Values.config.gcpProject | quote }}
+  GCP_REGION:             {{ .Values.config.gcpRegion | quote }}
+  GCS_RAW_BUCKET:         {{ .Values.config.gcsBucket | quote }}
+  WINDOW_SIZE:            {{ .Values.config.windowSize | quote }}
+  RUL_CAP:                {{ .Values.config.rulCap | quote }}
+  REDIS_HOST:             {{ .Values.redis.host | quote }}
+  REDIS_PORT:             {{ .Values.redis.port | quote }}
+  DB_HOST:                {{ .Values.postgres.host | quote }}
+  DB_PORT:                {{ .Values.postgres.port | quote }}
+  DB_NAME:                {{ .Values.postgres.database | quote }}
+  DB_USER:                {{ .Values.postgres.username | quote }}
+  FLINK_JOBMANAGER_HOST:  {{ .Values.flink.jobmanager.host | quote }}
+  FLINK_JOBMANAGER_PORT:  {{ .Values.flink.jobmanager.port | quote }}
+  # Caps records loaded per CronJob run — prevents OOMKill on the submitter pod.
+  # Keep in sync with data-ingestion cyclesPerRun (currently 50).
+  STREAM_BATCH_SIZE:      {{ .Values.streamProcessor.batchSize | quote }}

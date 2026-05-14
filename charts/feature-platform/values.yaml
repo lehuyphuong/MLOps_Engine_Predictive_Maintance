@@ -8,33 +8,27 @@ config:
   gcpProject:   "aide2-494008"
   gcpRegion:    "us-central1"
   gcsBucket:    "phm-raw-data-aide2-494008"
-  windowSize:   "24"       # rolling window length per engine
-  rulCap:       "125"      # piecewise linear RUL cap
+  windowSize:   "30"
+  rulCap:       "125"
 
 # -------------------------------------------------------------------
-# Redis (online store) — from: terraform output redis_host
+# Redis (online store)
 # -------------------------------------------------------------------
 redis:
-  host: "10.72.0.3"   # terraform output redis_host
+  host: "10.72.0.3"
   port: "6379"
 
 # -------------------------------------------------------------------
-# PostgreSQL (offline store) — from: terraform output db_private_ip
+# PostgreSQL (offline store)
 # -------------------------------------------------------------------
 postgres:
-  host:     "10.72.1.3"  # terraform output db_private_ip
+  host:     "10.72.1.3"
   port:     "5432"
   database: "phmdb"
   username: "phmadmin"
-  # password injected via Kubernetes Secret — feature-platform-secrets
 
 # -------------------------------------------------------------------
-# Stream Processor — PyFlink CronJob
-# Runs 3 min after validation service completes (validator runs at */5)
-# PyFlink chosen over full Flink cluster to stay within e2-standard-4
-# resource budget (no separate JobManager + TaskManager JVMs needed).
-# Single pod runs PyFlink in local execution mode — sufficient for the
-# 24-cycle windowed aggregation workload on this dataset size.
+# Stream Processor CronJob
 # -------------------------------------------------------------------
 streamProcessor:
   schedule: "3-58/5 * * * *"
@@ -45,15 +39,38 @@ streamProcessor:
   resources:
     requests:
       cpu:    "250m"
-      memory: "512Mi"    # increased from 256Mi — PyFlink JVM needs headroom
+      memory: "512Mi"
     limits:
       cpu:    "500m"
-      memory: "1Gi"      # hard cap — stays well within e2-standard-4 (16GB)
+      memory: "1Gi"
+  # Must match data-ingestion cyclesPerRun (30).
+  # Each CronJob run loads exactly this many validated events,
+  # submits one Flink job, then exits. Keeps memory bounded.
+  batchSize: "30"
+
+# -------------------------------------------------------------------
+# Flink standalone cluster
+# -------------------------------------------------------------------
+flink:
+  jobmanager:
+    host: "flink-jobmanager"
+    port: "8081"
+
+  taskManagerReplicas: 1
+  uiNodePort: 30081
+
+  taskManager:
+    resources:
+      requests:
+        cpu:    "500m"
+        memory: "1Gi"
+      limits:
+        cpu:    "1000m"
+        memory: "1Gi"
 
 # -------------------------------------------------------------------
 # ServiceAccount / Workload Identity
 # -------------------------------------------------------------------
 serviceAccount:
   name: feature-platform-sa
-  # Email from: terraform output workload_identity_annotations
   gcpServiceAccount: "phm-feature-platform@aide2-494008.iam.gserviceaccount.com"

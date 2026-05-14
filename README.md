@@ -378,8 +378,17 @@ kubectl run pg-client --image=postgres:15 -n feature-platform --rm -it \
      -c "SELECT dataset, unit_id, cycle FROM engine_features LIMIT 5;"
 ```
 
+5. Port forward Flink UI locally
+```bash
+kubectl port-forward svc/flink-jobmanager 8081:8081 -n feature-platform
+
+```
+
 - Output of feature-platform namespace  
 ![](assets/imgs/feature-platform_namespace_pods.png)  
+
+- Flink UI screenshot  
+![](assets/imgs/Flink_UI.png)  
 
 ---
 

@@ -7,7 +7,7 @@ config:
   gcpRegion:        "us-central1"
   gcsBucket:        "phm-raw-data-aide2-494008"
   gcsQualityBucket: "phm-data-quality-aide2-494008"
-  cyclesPerRun:     "50"
+  cyclesPerRun:     "30"
   gcsDataKey:       "cmapss-data/simulated_FD002.txt"
 
 # -------------------------------------------------------------------

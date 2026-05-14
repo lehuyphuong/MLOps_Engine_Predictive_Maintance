@@ -1,0 +1,185 @@
+# charts/feature-platform/templates/flink-cluster.yaml
+#
+# Standalone Flink cluster — JobManager + TaskManager
+#
+# Both pods use start_jobmanager.py / start_taskmanager.py as their command.
+# These Python scripts call pyflink.find_flink_home._find_flink_home() to
+# resolve the real pyflink bin/ path at runtime, then exec the shell script.
+# This avoids the CrashLoopBackOff caused by $FLINK_HOME being unset in the
+# python:3.10-slim base image (exit code 127).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── JobManager Deployment ─────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flink-jobmanager
+  namespace: feature-platform
+  labels:
+    app: flink
+    component: jobmanager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: flink
+      component: jobmanager
+  template:
+    metadata:
+      labels:
+        app: flink
+        component: jobmanager
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      containers:
+        - name: jobmanager
+          image: "{{ .Values.streamProcessor.image.repository }}:{{ .Values.streamProcessor.image.tag }}"
+          imagePullPolicy: {{ .Values.streamProcessor.image.pullPolicy }}
+
+          # Python resolves FLINK_HOME via pyflink.find_flink_home at runtime,
+          # then execs bin/jobmanager.sh start-foreground.
+          command: ["python", "src/start_jobmanager.py"]
+
+          ports:
+            - name: ui
+              containerPort: 8081
+            - name: rpc
+              containerPort: 6123
+            - name: blob
+              containerPort: 6124
+
+          env:
+            - name: JOB_MANAGER_RPC_ADDRESS
+              value: flink-jobmanager
+
+          envFrom:
+            - configMapRef:
+                name: feature-platform-config
+
+          resources:
+            requests:
+              cpu:    "250m"
+              memory: "512Mi"
+            limits:
+              cpu:    "500m"
+              memory: "1Gi"
+
+          livenessProbe:
+            httpGet:
+              path: /overview
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds:       15
+            failureThreshold:    3
+
+          readinessProbe:
+            httpGet:
+              path: /overview
+              port: 8081
+            initialDelaySeconds: 20
+            periodSeconds:       10
+
+---
+# ── JobManager ClusterIP Service ──────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: flink-jobmanager
+  namespace: feature-platform
+  labels:
+    app: flink
+    component: jobmanager
+spec:
+  selector:
+    app: flink
+    component: jobmanager
+  ports:
+    - name: ui
+      port: 8081
+      targetPort: 8081
+    - name: rpc
+      port: 6123
+      targetPort: 6123
+    - name: blob
+      port: 6124
+      targetPort: 6124
+
+---
+# ── JobManager UI NodePort Service ───────────────────────────────────────────
+# Access the Flink Web UI at http://<node-external-ip>:30081
+# Find a node IP with: kubectl get nodes -o wide
+apiVersion: v1
+kind: Service
+metadata:
+  name: flink-jobmanager-ui
+  namespace: feature-platform
+  labels:
+    app: flink
+    component: jobmanager-ui
+spec:
+  type: NodePort
+  selector:
+    app: flink
+    component: jobmanager
+  ports:
+    - name: ui
+      port:       8081
+      targetPort: 8081
+      nodePort:   {{ .Values.flink.uiNodePort }}
+
+---
+# ── TaskManager Deployment ────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flink-taskmanager
+  namespace: feature-platform
+  labels:
+    app: flink
+    component: taskmanager
+spec:
+  replicas: {{ .Values.flink.taskManagerReplicas }}
+  selector:
+    matchLabels:
+      app: flink
+      component: taskmanager
+  template:
+    metadata:
+      labels:
+        app: flink
+        component: taskmanager
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      containers:
+        - name: taskmanager
+          image: "{{ .Values.streamProcessor.image.repository }}:{{ .Values.streamProcessor.image.tag }}"
+          imagePullPolicy: {{ .Values.streamProcessor.image.pullPolicy }}
+
+          command: ["python", "src/start_taskmanager.py"]
+
+          ports:
+            - name: data
+              containerPort: 6121
+            - name: ipc
+              containerPort: 6122
+
+          env:
+            - name: JOB_MANAGER_RPC_ADDRESS
+              value: flink-jobmanager
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: feature-platform-secrets
+                  key: db-password
+
+          envFrom:
+            - configMapRef:
+                name: feature-platform-config
+
+          resources:
+            requests:
+              cpu:    {{ .Values.flink.taskManager.resources.requests.cpu | quote }}
+              memory: {{ .Values.flink.taskManager.resources.requests.memory | quote }}
+            limits:
+              cpu:    {{ .Values.flink.taskManager.resources.limits.cpu | quote }}
+              memory: {{ .Values.flink.taskManager.resources.limits.memory | quote }}
