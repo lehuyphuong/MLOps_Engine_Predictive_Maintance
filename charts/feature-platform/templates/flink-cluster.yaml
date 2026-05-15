@@ -1,15 +1,17 @@
 # charts/feature-platform/templates/flink-cluster.yaml
 #
-# Standalone Flink cluster — JobManager + TaskManager
+# Key fix: TaskManager must be a StatefulSet, not a Deployment.
 #
-# Both pods use start_jobmanager.py / start_taskmanager.py as their command.
-# These Python scripts call pyflink.find_flink_home._find_flink_home() to
-# resolve the real pyflink bin/ path at runtime, then exec the shell script.
-# This avoids the CrashLoopBackOff caused by $FLINK_HOME being unset in the
-# python:3.10-slim base image (exit code 127).
-# ─────────────────────────────────────────────────────────────────────────────
+# Headless Service + subdomain creates per-pod DNS records ONLY for
+# StatefulSet pods. For Deployment pods the subdomain field is ignored
+# by kube-dns — the pod hostname is never registered, causing:
+#   UnknownHostException: <pod-name>.<subdomain>.<ns>.svc.cluster.local
+#
+# StatefulSet pods get stable, predictable DNS names:
+#   flink-taskmanager-0.flink-taskmanager-hl.feature-platform.svc.cluster.local
+# This is resolvable by the JobManager, allowing slot assignment to succeed.
 
-# ── JobManager Deployment ─────────────────────────────────────────────────────
+# JobManager Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -35,11 +37,9 @@ spec:
         - name: jobmanager
           image: "{{ .Values.streamProcessor.image.repository }}:{{ .Values.streamProcessor.image.tag }}"
           imagePullPolicy: {{ .Values.streamProcessor.image.pullPolicy }}
-
-          # Python resolves FLINK_HOME via pyflink.find_flink_home at runtime,
-          # then execs bin/jobmanager.sh start-foreground.
-          command: ["python", "src/start_jobmanager.py"]
-
+          command:
+            - python
+            - src/start_jobmanager.py
           ports:
             - name: ui
               containerPort: 8081
@@ -47,15 +47,20 @@ spec:
               containerPort: 6123
             - name: blob
               containerPort: 6124
-
           env:
             - name: JOB_MANAGER_RPC_ADDRESS
               value: flink-jobmanager
-
+            - name: FLINK_REST_BIND_ADDRESS
+              value: "0.0.0.0"
+            - name: FLINK_REST_ADDRESS
+              value: flink-jobmanager
+            - name: FLINK_JM_BIND_HOST
+              value: "0.0.0.0"
+            - name: FLINK_JM_RPC_ADDRESS
+              value: flink-jobmanager
           envFrom:
             - configMapRef:
                 name: feature-platform-config
-
           resources:
             requests:
               cpu:    "250m"
@@ -63,7 +68,6 @@ spec:
             limits:
               cpu:    "500m"
               memory: "1Gi"
-
           livenessProbe:
             httpGet:
               path: /overview
@@ -71,7 +75,6 @@ spec:
             initialDelaySeconds: 30
             periodSeconds:       15
             failureThreshold:    3
-
           readinessProbe:
             httpGet:
               path: /overview
@@ -80,7 +83,7 @@ spec:
             periodSeconds:       10
 
 ---
-# ── JobManager ClusterIP Service ──────────────────────────────────────────────
+# JobManager ClusterIP Service
 apiVersion: v1
 kind: Service
 metadata:
@@ -103,11 +106,12 @@ spec:
     - name: blob
       port: 6124
       targetPort: 6124
+    - name: blob-server
+      port: 6125
+      targetPort: 6125
 
 ---
-# ── JobManager UI NodePort Service ───────────────────────────────────────────
-# Access the Flink Web UI at http://<node-external-ip>:30081
-# Find a node IP with: kubectl get nodes -o wide
+# JobManager UI NodePort Service
 apiVersion: v1
 kind: Service
 metadata:
@@ -128,9 +132,40 @@ spec:
       nodePort:   {{ .Values.flink.uiNodePort }}
 
 ---
-# ── TaskManager Deployment ────────────────────────────────────────────────────
+# TaskManager headless Service
+# Required for StatefulSet pod DNS registration.
+# Creates DNS A records:
+#   flink-taskmanager-0.flink-taskmanager-hl.feature-platform.svc.cluster.local
+#   flink-taskmanager-1.flink-taskmanager-hl.feature-platform.svc.cluster.local
+#   ...
+# The serviceName in the StatefulSet spec must match this Service name.
+apiVersion: v1
+kind: Service
+metadata:
+  name: flink-taskmanager-hl
+  namespace: feature-platform
+  labels:
+    app: flink
+    component: taskmanager
+spec:
+  clusterIP: None
+  selector:
+    app: flink
+    component: taskmanager
+  ports:
+    - name: data
+      port: 6121
+      targetPort: 6121
+    - name: ipc
+      port: 6122
+      targetPort: 6122
+
+---
+# TaskManager StatefulSet
+# StatefulSet (not Deployment) so each pod gets a stable DNS name via the
+# headless Service above. Pod names are ordinal: flink-taskmanager-0, -1, etc.
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: flink-taskmanager
   namespace: feature-platform
@@ -138,6 +173,7 @@ metadata:
     app: flink
     component: taskmanager
 spec:
+  serviceName: flink-taskmanager-hl   # must match the headless Service name
   replicas: {{ .Values.flink.taskManagerReplicas }}
   selector:
     matchLabels:
@@ -154,28 +190,29 @@ spec:
         - name: taskmanager
           image: "{{ .Values.streamProcessor.image.repository }}:{{ .Values.streamProcessor.image.tag }}"
           imagePullPolicy: {{ .Values.streamProcessor.image.pullPolicy }}
-
-          command: ["python", "src/start_taskmanager.py"]
-
+          command:
+            - python
+            - src/start_taskmanager.py
           ports:
             - name: data
               containerPort: 6121
             - name: ipc
               containerPort: 6122
-
           env:
             - name: JOB_MANAGER_RPC_ADDRESS
               value: flink-jobmanager
+            - name: FLINK_JM_RPC_ADDRESS
+              value: flink-jobmanager
+            - name: FLINK_TM_BIND_HOST
+              value: "0.0.0.0"
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: feature-platform-secrets
                   key: db-password
-
           envFrom:
             - configMapRef:
                 name: feature-platform-config
-
           resources:
             requests:
               cpu:    {{ .Values.flink.taskManager.resources.requests.cpu | quote }}

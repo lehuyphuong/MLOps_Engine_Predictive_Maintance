@@ -18,6 +18,7 @@ import argparse
 import json
 import logging
 import os
+import sys
 from datetime import datetime, timezone
 
 import psycopg2
@@ -173,6 +174,20 @@ def main():
     env = StreamExecutionEnvironment.get_execution_environment()
     env.set_runtime_mode(RuntimeExecutionMode.BATCH)
     env.set_parallelism(1)
+
+    # REQUIRED for remote submission with Python operators.
+    #
+    # TableEnvironment auto-sets python.executable = sys.executable, but only
+    # for local deployments. StreamExecutionEnvironment never sets it at all.
+    # Without this, the TaskManager has no python.executable configured and
+    # cannot launch the Python UDF worker process — the slot request times out
+    # after the default 5-minute batch slot timeout.
+    #
+    # sys.executable is the Python binary that started this flink_job.py
+    # script (/usr/local/bin/python3.10 in our image). The TaskManager pod
+    # runs the same Docker image, so the path is identical on both the
+    # submitter pod and the TaskManager pod.
+    env.set_python_executable(sys.executable)
 
     serialised = [json.dumps(r) for r in records]
 

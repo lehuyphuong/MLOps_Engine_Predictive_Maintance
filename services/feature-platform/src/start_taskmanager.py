@@ -1,57 +1,71 @@
 #!/usr/bin/env python3
 """
-start_taskmanager.py — resolves FLINK_HOME, patches flink-conf.yaml,
-then starts the TaskManager.
+start_taskmanager.py
 
-Same approach as start_jobmanager.py — see that file for the full explanation
-of why we patch flink-conf.yaml instead of passing -D flags on the CLI.
+Resolves FLINK_HOME and starts the TaskManager with the correct FQDN
+that the JobManager can resolve via kube-dns.
+
+StatefulSet pod naming:
+  Pod names are ordinal: flink-taskmanager-0, flink-taskmanager-1, ...
+  Combined with the headless Service (flink-taskmanager-hl) and namespace,
+  kube-dns registers:
+    flink-taskmanager-0.flink-taskmanager-hl.feature-platform.svc.cluster.local
+
+  This FQDN resolves correctly from the JobManager pod because StatefulSet
+  pods (unlike Deployment pods) are registered in kube-dns via the headless
+  Service + serviceName binding.
+
+  HOSTNAME is set to the pod name by Kubernetes automatically
+  (e.g. flink-taskmanager-0).
 """
 import os
-
 from pyflink.find_flink_home import _find_flink_home
 
 flink_home = _find_flink_home()
 os.environ["FLINK_HOME"] = flink_home
 
 conf_path = os.path.join(flink_home, "conf", "flink-conf.yaml")
+rpc_addr  = os.environ["JOB_MANAGER_RPC_ADDRESS"]
 
-rpc_address  = os.environ.get("JOB_MANAGER_RPC_ADDRESS", "flink-jobmanager")
-pod_hostname = os.environ.get("HOSTNAME", "localhost")
+# StatefulSet pod name is ordinal and stable: flink-taskmanager-0
+pod_name  = os.environ.get("HOSTNAME", "flink-taskmanager-0")
+subdomain = "flink-taskmanager-hl"
+namespace = "feature-platform"
+pod_fqdn  = f"{pod_name}.{subdomain}.{namespace}.svc.cluster.local"
 
-OVERRIDES = {
-    "jobmanager.rpc.address":  rpc_address,
-    "taskmanager.bind-host":   "0.0.0.0",
-    "taskmanager.host":        pod_hostname,
+print(f"start_taskmanager.py — pod_name={pod_name} fqdn={pod_fqdn}")
+
+overrides = {
+    "jobmanager.rpc.address": os.environ.get("FLINK_JM_RPC_ADDRESS",  rpc_addr),
+    "taskmanager.bind-host":  os.environ.get("FLINK_TM_BIND_HOST",    "0.0.0.0"),
+    "taskmanager.host":       os.environ.get("FLINK_TM_HOST",         pod_fqdn),
 }
 
-# patch flink-conf.yaml
-with open(conf_path, "r") as f:
+with open(conf_path) as f:
     lines = f.readlines()
 
-patched_keys = set()
-new_lines    = []
+patched, new_lines = set(), []
 for line in lines:
-    stripped = line.strip()
-    if stripped.startswith("#") or ":" not in stripped:
+    s = line.strip()
+    if s.startswith("#") or ":" not in s:
         new_lines.append(line)
         continue
-    key = stripped.split(":", 1)[0].strip()
-    if key in OVERRIDES:
-        new_lines.append(f"{key}: {OVERRIDES[key]}\n")
-        patched_keys.add(key)
+    key = s.split(":", 1)[0].strip()
+    if key in overrides:
+        new_lines.append(f"{key}: {overrides[key]}\n")
+        patched.add(key)
     else:
         new_lines.append(line)
 
-for key, val in OVERRIDES.items():
-    if key not in patched_keys:
-        new_lines.append(f"{key}: {val}\n")
+for k, v in overrides.items():
+    if k not in patched:
+        new_lines.append(f"{k}: {v}\n")
 
 with open(conf_path, "w") as f:
     f.writelines(new_lines)
 
-print(f"flink-conf.yaml patched — overrides: {OVERRIDES}")
+print(f"start_taskmanager.py — patched flink-conf.yaml: {overrides}")
 
-# exec taskmanager.sh start-foreground
 taskmanager_sh = os.path.join(flink_home, "bin", "taskmanager.sh")
-
+print(f"Executing: {taskmanager_sh} start-foreground")
 os.execv("/bin/bash", ["/bin/bash", taskmanager_sh, "start-foreground"])
