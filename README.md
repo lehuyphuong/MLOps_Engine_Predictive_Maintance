@@ -396,12 +396,43 @@ kubectl port-forward svc/flink-jobmanager 8081:8081 -n feature-platform
 
 The model-training namespace runs three Kubernetes Jobs: RUL model training (XGBoost, RMSE=0.2721), anomaly model training (LSTM AutoEncoder, threshold=0.117615), and model registry promotion (RMSE gate + drift check, writes promotion manifest to GCS).
 
+0. Add iam role
+```bash
+# Raw data bucket — upgrade from objectViewer to objectAdmin
+gsutil iam ch \
+  serviceAccount:phm-model-training@aide2-494008.iam.gserviceaccount.com:roles/storage.objectAdmin \
+  gs://phm-raw-data-aide2-494008
+
+# Artifacts bucket — for saving trained models
+gsutil iam ch \
+  serviceAccount:phm-model-training@aide2-494008.iam.gserviceaccount.com:roles/storage.objectAdmin \
+  gs://phm-model-artifacts-aide2-494008
+
+# MLflow artifacts bucket
+gsutil iam ch \
+  serviceAccount:phm-model-training@aide2-494008.iam.gserviceaccount.com:roles/storage.objectAdmin \
+  gs://phm-mlflow-artifacts-aide2-494008
+
+# Grant model-registry SA access to GCS artifacts bucket
+gsutil iam ch \
+  serviceAccount:phm-model-training@aide2-494008.iam.gserviceaccount.com:roles/storage.objectAdmin \
+  gs://phm-model-artifacts-aide2-494008  
+```
+
 1. Upload training data to GCS:
 
 ```bash
 gsutil cp data/CMaps/train_FD002.txt gs://phm-raw-data-aide2-494008/offline/
 gsutil cp data/CMaps/test_FD002.txt  gs://phm-raw-data-aide2-494008/offline/
 gsutil cp data/CMaps/RUL_FD002.txt   gs://phm-raw-data-aide2-494008/offline/
+
+# Verify the fix works from inside the cluster
+kubectl run wi-test \
+  --image=google/cloud-sdk:slim \
+  --serviceaccount=model-training-sa \
+  -n model-training --rm -it --restart=Never \
+  -- gsutil ls gs://phm-raw-data-aide2-494008/offline/
+
 ```
 
 2. Build and push images:
@@ -422,26 +453,50 @@ cd ../..
 ```
 
 3. Create namespace and secret, then install:
-
 ```bash
+# Create mlflowdb so MLflow never touches phmdb's alembic_version
+kubectl run pg-setup --image=postgres:15 --rm -it --restart=Never \
+  --env="PGPASSWORD=$(terraform -chdir=terraforms output -raw db_password)" \
+  -- psql -h 10.72.1.3 -U phmadmin -d postgres -c "
+CREATE DATABASE mlflowdb OWNER phmadmin;
+" 2>/dev/null || echo "mlflowdb may already exist, continuing..."
+
+# Clear phmdb alembic_version so Airflow starts fresh
+kubectl run pg-clean --image=postgres:15 --rm -it --restart=Never \
+  --env="PGPASSWORD=$(terraform -chdir=terraforms output -raw db_password)" \
+  -- psql -h 10.72.1.3 -U phmadmin -d phmdb -c "
+DELETE FROM public.alembic_version;
+CREATE SCHEMA IF NOT EXISTS airflow;
+GRANT ALL ON SCHEMA airflow TO phmadmin;
+ALTER ROLE phmadmin SET search_path TO airflow, public;
+"
+
+# Create namespace
 kubectl create namespace model-training
+
+# Create secret
 kubectl create secret generic model-training-secrets \
   --from-literal=db-password="$(terraform -chdir=terraforms output -raw db_password)" \
   -n model-training
 
-helm install model-training charts/model-training \
-  -n model-training --create-namespace
-```
+DB_PASS=$(terraform -chdir=terraforms output -raw db_password)
+DB_PASS_ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${DB_PASS}', safe=''))")
 
-4. Watch training jobs:
+kubectl create secret generic airflow-secrets \
+  --from-literal=sql-alchemy-conn="postgresql://phmadmin:${DB_PASS_ENCODED}@10.72.1.3:5432/phmdb" \
+  --from-literal=admin-password="changeme" \
+  -n model-training
 
-```bash
-kubectl get jobs -n model-training
-kubectl logs -n model-training -l app=model-training -f
-kubectl logs -n model-training -l app=model-registry -f
+# Verify
+kubectl get secrets -n model-training
 
-# Verify model artifacts in GCS
-gsutil ls -r gs://phm-model-artifacts-aide2-494008/
+# Install
+helm install model-training charts/model-training -n model-training
+
+# Open other terminal and run port-foward
+kubectl port-forward svc/airflow-webserver 8090:8090 -n model-training
+
+
 ```
 
 - Output of model-training namespace  
@@ -478,8 +533,11 @@ kubectl port-forward pod/mlflow-ui 5000:5000 -n model-training
 # Open: http://localhost:5000
 ```
 
-- MLflow UI screnshot
+- MLflow UI screenshot
 ![](assets/imgs/MLflow_UI.png)  
+
+- Airflow UI screenshot
+![](assets/imgs/Airfow_UI.png)
 
 ---
 

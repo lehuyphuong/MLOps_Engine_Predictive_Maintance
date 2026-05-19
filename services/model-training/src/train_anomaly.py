@@ -76,9 +76,11 @@ DB_NAME      = os.environ.get("DB_NAME",     "phmdb")
 DB_USER      = os.environ.get("DB_USER",     "phmadmin")
 DB_PASSWORD  = os.environ.get("DB_PASSWORD", "")
 
+MLFLOW_DB_NAME  = os.environ.get("MLFLOW_DB_NAME", "mlflowdb")
+
 MLFLOW_TRACKING_URI = (
     f"postgresql+psycopg2://{DB_USER}:{quote_plus(DB_PASSWORD)}"
-    f"@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    f"@{DB_HOST}:{DB_PORT}/{MLFLOW_DB_NAME}"
 )
 
 COLS_TO_DROP = [
