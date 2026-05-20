@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-config
+  namespace: dashboard
+data:
+  DATASET:             {{ .Values.config.dataset | quote }}
+  GCP_PROJECT:         {{ .Values.config.gcpProject | quote }}
+  GCP_REGION:          {{ .Values.config.gcpRegion | quote }}
+  DB_HOST:             {{ .Values.config.dbHost | quote }}
+  DB_PORT:             {{ .Values.config.dbPort | quote }}
+  DB_NAME:             {{ .Values.config.dbName | quote }}
+  DB_USER:             {{ .Values.config.dbUser | quote }}
+  REDIS_HOST:          {{ .Values.config.redisHost | quote }}
+  REDIS_PORT:          {{ .Values.config.redisPort | quote }}
+  GCS_RAW_BUCKET:      {{ .Values.config.gcsRawBucket | quote }}
+  MLFLOW_TRACKING_URI: {{ .Values.config.mlflowTrackingUri | quote }}

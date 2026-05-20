@@ -1,0 +1,55 @@
+# values.yaml — model-training chart
+
+# -------------------------------------------------------------------
+# Training config
+# -------------------------------------------------------------------
+config:
+  dataset:              "FD002"
+  trainingMode:         "offline"
+  nRuns:                "10"
+  rulCap:               "125"
+  gcpProject:           "aide2-494008"
+  gcpRegion:            "us-central1"
+  gcsRawBucket:         "phm-raw-data-aide2-494008"
+  gcsArtifactsBucket:   "phm-model-artifacts-aide2-494008"
+  gcsMlflowBucket:      "phm-mlflow-artifacts-aide2-494008"
+
+# -------------------------------------------------------------------
+# PostgreSQL — MLflow backend + feature store + Airflow metadata
+# -------------------------------------------------------------------
+postgres:
+  host:     "10.72.1.3"  # terraform output db_private_ip
+  port:     "5432"
+  database: "phmdb"
+  username: "phmadmin"
+
+# -------------------------------------------------------------------
+# Model training image (used by Airflow KubernetesPodOperator tasks)
+# -------------------------------------------------------------------
+image:
+  repository: us-central1-docker.pkg.dev/aide2-494008/phm-model-training/model-training
+  tag:        latest
+
+# -------------------------------------------------------------------
+# Apache Airflow
+# Uses LocalExecutor (scheduler and webserver in same namespace).
+# KubernetesExecutor for task pods — no Celery / Redis needed.
+# Metadata stored in phmdb with search_path=airflow schema.
+# -------------------------------------------------------------------
+airflow:
+  image:
+    # Confirmed existing tag on Docker Hub (verified May 2026).
+    # Must include Python version suffix — bare version tags default to
+    # Python 3.8 which is the wrong runtime.
+    # Use postgresql:// (not postgresql+psycopg2://) in the airflow-secrets
+    # sql-alchemy-conn — the +psycopg2 dialect suffix triggers
+    # _upgrade_postgres_metastore_conn which raises ValueError on all 2.x versions.
+    repository: apache/airflow
+    tag:        "2.9.2-python3.11"
+
+# -------------------------------------------------------------------
+# ServiceAccount / Workload Identity
+# -------------------------------------------------------------------
+serviceAccount:
+  name: model-training-sa
+  gcpServiceAccount: "phm-model-training@aide2-494008.iam.gserviceaccount.com"

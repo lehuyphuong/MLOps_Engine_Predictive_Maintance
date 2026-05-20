@@ -1,0 +1,268 @@
+---
+# Grafana data sources — Prometheus + Loki
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitoring-grafana-datasources
+  namespace: monitoring
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus-svc.monitoring.svc.cluster.local:9090/prometheus
+        isDefault: true
+        jsonData:
+          timeInterval: "15s"
+
+      - name: Loki
+        type: loki
+        url: http://loki-svc.monitoring.svc.cluster.local:3100
+        jsonData:
+          maxLines: 1000
+
+---
+# Grafana dashboard provisioning
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitoring-grafana-dashboards-config
+  namespace: monitoring
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: monitoring-dashboards
+        folder: PHM Monitoring
+        type: file
+        options:
+          path: /var/lib/grafana/dashboards
+
+---
+# PHM Pipeline Health Dashboard
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitoring-grafana-dashboard
+  namespace: monitoring
+data:
+  pipeline-health.json: |
+    {
+      "title": "PHM Pipeline Health",
+      "uid": "phm-pipeline-health",
+      "timezone": "browser",
+      "refresh": "30s",
+      "panels": [
+        {
+          "id": 1,
+          "title": "Pod Restarts — All PHM Namespaces",
+          "type": "timeseries",
+          "gridPos": {"x": 0, "y": 0, "w": 24, "h": 7},
+          "datasource": "Prometheus",
+          "targets": [{
+            "expr": "changes(process_start_time_seconds{job='phm-model-serving'}[1h])",
+            "legendFormat": "{{ "{{" }}namespace{{ "}}" }}/{{ "{{" }}pod{{ "}}" }}"
+          }]
+        },
+        {
+          "id": 2,
+          "title": "FastAPI — Request Rate (/infer + /trigger)",
+          "type": "timeseries",
+          "gridPos": {"x": 0, "y": 7, "w": 12, "h": 7},
+          "datasource": "Prometheus",
+          "targets": [{
+            "expr": "rate(http_requests_total{job='phm-model-serving'}[1m])",
+            "legendFormat": "{{ "{{" }}method{{ "}}" }} {{ "{{" }}handler{{ "}}" }} {{ "{{" }}status_code{{ "}}" }}"
+          }]
+        },
+        {
+          "id": 3,
+          "title": "FastAPI — Inference Latency (p50/p95/p99)",
+          "type": "timeseries",
+          "gridPos": {"x": 12, "y": 7, "w": 12, "h": 7},
+          "datasource": "Prometheus",
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket{job='phm-model-serving'}[5m]))",
+              "legendFormat": "p50"
+            },
+            {
+              "expr": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job='phm-model-serving'}[5m]))",
+              "legendFormat": "p95"
+            },
+            {
+              "expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{job='phm-model-serving'}[5m]))",
+              "legendFormat": "p99"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Memory Usage — Per Namespace",
+          "type": "timeseries",
+          "gridPos": {"x": 0, "y": 14, "w": 12, "h": 7},
+          "datasource": "Prometheus",
+          "targets": [{
+            "expr": "process_resident_memory_bytes{job='phm-model-serving'}",
+            "legendFormat": "{{ "{{" }}namespace{{ "}}" }}"
+          }]
+        },
+        {
+          "id": 5,
+          "title": "CPU Usage — Per Namespace",
+          "type": "timeseries",
+          "gridPos": {"x": 12, "y": 14, "w": 12, "h": 7},
+          "datasource": "Prometheus",
+          "targets": [{
+            "expr": "rate(process_cpu_seconds_total{job='phm-model-serving'}[1m])",
+            "legendFormat": "{{ "{{" }}namespace{{ "}}" }}"
+          }]
+        },
+        {
+          "id": 6,
+          "title": "Log Stream — Stream Processor",
+          "type": "logs",
+          "gridPos": {"x": 0, "y": 21, "w": 12, "h": 7},
+          "datasource": "Loki",
+          "targets": [{
+            "expr": "{namespace=\"feature-platform\"}",
+            "legendFormat": ""
+          }]
+        },
+        {
+          "id": 7,
+          "title": "Log Stream — Model Serving",
+          "type": "logs",
+          "gridPos": {"x": 12, "y": 21, "w": 12, "h": 7},
+          "datasource": "Loki",
+          "targets": [{
+            "expr": "{namespace=\"model-serving\", container=\"serving\"}",
+            "legendFormat": ""
+          }]
+        },
+        {
+          "id": 8,
+          "title": "Log Stream — Alert Engine",
+          "type": "logs",
+          "gridPos": {"x": 0, "y": 28, "w": 12, "h": 7},
+          "datasource": "Loki",
+          "targets": [{
+            "expr": "{namespace=\"alert-naming\"}",
+            "legendFormat": ""
+          }]
+        },
+        {
+          "id": 9,
+          "title": "Log Stream — Validation Errors",
+          "type": "logs",
+          "gridPos": {"x": 12, "y": 28, "w": 12, "h": 7},
+          "datasource": "Loki",
+          "targets": [{
+            "expr": "{namespace=\"data-ingestion\"} |= \"INVALID\"",
+            "legendFormat": ""
+          }]
+        }
+      ]
+    }
+
+---
+# Grafana Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitoring-grafana
+  namespace: monitoring
+  labels:
+    app: monitoring-grafana
+spec:
+  replicas: {{ .Values.grafana.replicas }}
+  selector:
+    matchLabels:
+      app: monitoring-grafana
+  template:
+    metadata:
+      labels:
+        app: monitoring-grafana
+    spec:
+      containers:
+        - name: grafana
+          image: "{{ .Values.grafana.image.repository }}:{{ .Values.grafana.image.tag }}"
+          imagePullPolicy: {{ .Values.grafana.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.grafana.port }}
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: {{ .Values.grafana.adminUser | quote }}
+            - name: GF_SERVER_ROOT_URL
+              value: "http://{{ .Values.ingress.devIp }}/monitoring"
+            - name: GF_SERVER_SERVE_FROM_SUB_PATH
+              value: "true"
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboards-config
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+            - name: grafana-storage
+              mountPath: /var/lib/grafana
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.grafana.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.grafana.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu:    {{ .Values.grafana.resources.requests.cpu | quote }}
+              memory: {{ .Values.grafana.resources.requests.memory | quote }}
+            limits:
+              cpu:    {{ .Values.grafana.resources.limits.cpu | quote }}
+              memory: {{ .Values.grafana.resources.limits.memory | quote }}
+      volumes:
+        - name: datasources
+          configMap:
+            name: monitoring-grafana-datasources
+        - name: dashboards-config
+          configMap:
+            name: monitoring-grafana-dashboards-config
+        - name: dashboards
+          configMap:
+            name: monitoring-grafana-dashboard
+        - name: grafana-storage
+          persistentVolumeClaim:
+            claimName: monitoring-grafana-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitoring-grafana-svc
+  namespace: monitoring
+spec:
+  selector:
+    app: monitoring-grafana
+  ports:
+    - port: 3000
+      targetPort: {{ .Values.grafana.port }}
+  type: ClusterIP
+
+---
+# Grafana PVC — persists grafana.db so password changes survive pod restarts
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: monitoring-grafana-pvc
+  namespace: monitoring
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: standard-rwo
+  resources:
+    requests:
+      storage: 1Gi

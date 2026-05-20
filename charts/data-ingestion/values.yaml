@@ -1,0 +1,53 @@
+# -------------------------------------------------------------------
+# Shared config
+# -------------------------------------------------------------------
+config:
+  dataset:          "FD002"
+  gcpProject:       "aide2-494008"
+  gcpRegion:        "us-central1"
+  gcsBucket:        "phm-raw-data-aide2-494008"
+  gcsQualityBucket: "phm-data-quality-aide2-494008"
+  cyclesPerRun:     "30"
+  gcsDataKey:       "cmapss-data/simulated_FD002.txt"
+
+# -------------------------------------------------------------------
+# Producer CronJob
+# -------------------------------------------------------------------
+producer:
+  schedule: "*/5 * * * *"
+  image:
+    repository: us-central1-docker.pkg.dev/aide2-494008/phm-data-ingestion/data-ingestion
+    tag: latest
+    pullPolicy: Always
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+# -------------------------------------------------------------------
+# Validation Service CronJob
+# -------------------------------------------------------------------
+validator:
+  schedule: "2-57/5 * * * *"
+  image:
+    repository: us-central1-docker.pkg.dev/aide2-494008/phm-validation-service/validation-service
+    tag: latest
+    pullPolicy: Always
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "300m"
+      memory: "256Mi"
+
+# -------------------------------------------------------------------
+# ServiceAccount / Workload Identity
+# -------------------------------------------------------------------
+serviceAccount:
+  name: data-ingestion-sa
+  # Email from: terraform output workload_identity_annotations
+  gcpServiceAccount: "phm-data-ingestion@aide2-494008.iam.gserviceaccount.com"

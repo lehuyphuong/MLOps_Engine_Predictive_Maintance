@@ -1,0 +1,42 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: validation-service
+  namespace: data-ingestion
+  labels:
+    app: validation-service
+    component: data-ingestion
+spec:
+  schedule: {{ .Values.validator.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: validation-service
+        spec:
+          serviceAccountName: {{ .Values.serviceAccount.name }}
+          restartPolicy: OnFailure
+
+          containers:
+            - name: validator
+              image: "{{ .Values.validator.image.repository }}:{{ .Values.validator.image.tag }}"
+              imagePullPolicy: {{ .Values.validator.image.pullPolicy }}
+              args: ["src/validation_service.py"]
+
+              envFrom:
+                - configMapRef:
+                    name: data-ingestion-config
+
+              resources:
+                requests:
+                  cpu:    {{ .Values.validator.resources.requests.cpu | quote }}
+                  memory: {{ .Values.validator.resources.requests.memory | quote }}
+                limits:
+                  cpu:    {{ .Values.validator.resources.limits.cpu | quote }}
+                  memory: {{ .Values.validator.resources.limits.memory | quote }}

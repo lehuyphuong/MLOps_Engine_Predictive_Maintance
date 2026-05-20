@@ -1,0 +1,327 @@
+---
+# Grafana data sources — PostgreSQL + Redis
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: dashboard
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: PostgreSQL
+        type: postgres
+        url: {{ .Values.config.dbHost }}:{{ .Values.config.dbPort }}
+        database: {{ .Values.config.dbName }}
+        user: {{ .Values.config.dbUser }}
+        secureJsonData:
+          password: "${DB_PASSWORD}"
+        jsonData:
+          sslmode: disable
+          postgresVersion: 1500
+          timescaledb: false
+        isDefault: true
+
+---
+# Grafana dashboard provisioning config
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards-config
+  namespace: dashboard
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: phm-dashboards
+        folder: PHM
+        type: file
+        options:
+          path: /var/lib/grafana/dashboards
+
+---
+# PHM Fleet Dashboard — 4 rows
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-phm
+  namespace: dashboard
+data:
+  phm-dashboard.json: |
+    {
+      "title": "PHM Engine Fleet Health",
+      "uid": "phm-fleet",
+      "timezone": "browser",
+      "refresh": "30s",
+      "panels": [
+        {
+          "id": 1,
+          "title": "Critical Engines (RUL < 10)",
+          "type": "stat",
+          "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+          "datasource": "PostgreSQL",
+          "targets": [{
+            "rawSql": "SELECT COUNT(DISTINCT engine_id) FROM alerts WHERE dataset='FD002' AND alert_type='rul_threshold' AND severity='critical' AND indexed_at > NOW() - INTERVAL '1 hour'",
+            "format": "table"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"steps": [
+                {"color": "green", "value": 0},
+                {"color": "red",   "value": 1}
+              ]}
+            }
+          }
+        },
+        {
+          "id": 2,
+          "title": "Warning Engines (RUL 10-20)",
+          "type": "stat",
+          "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+          "datasource": "PostgreSQL",
+          "targets": [{
+            "rawSql": "SELECT COUNT(DISTINCT engine_id) FROM alerts WHERE dataset='FD002' AND alert_type='rul_threshold' AND severity='warning' AND indexed_at > NOW() - INTERVAL '1 hour'",
+            "format": "table"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"steps": [
+                {"color": "green",  "value": 0},
+                {"color": "yellow", "value": 1}
+              ]}
+            }
+          }
+        },
+        {
+          "id": 3,
+          "title": "Total Alerts Fired",
+          "type": "stat",
+          "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+          "datasource": "PostgreSQL",
+          "targets": [{
+            "rawSql": "SELECT COUNT(*) FROM alerts WHERE dataset='FD002'",
+            "format": "table"
+          }]
+        },
+        {
+          "id": 4,
+          "title": "Latest RUL per Engine",
+          "type": "table",
+          "gridPos": {"x": 0, "y": 4, "w": 24, "h": 6},
+          "datasource": "PostgreSQL",
+          "targets": [{
+            "rawSql": "SELECT unit_id AS \"Engine\", MAX(cycle) AS \"Latest Cycle\", COUNT(*) AS \"Cycles Recorded\" FROM engine_features WHERE dataset='FD002' GROUP BY unit_id ORDER BY unit_id",
+            "format": "table"
+          }]
+        },
+        {
+          "id": 5,
+          "title": "RUL Degradation Trend — All Engines",
+          "type": "timeseries",
+          "gridPos": {"x": 0, "y": 10, "w": 24, "h": 8},
+          "datasource": "PostgreSQL",
+          "targets": [{
+            "rawSql": "SELECT NOW() - ((max_cycle - cycle) * INTERVAL '5 minutes') AS time, unit_id::text AS metric, (max_cycle - cycle) AS rul FROM (SELECT unit_id, cycle, MAX(cycle) OVER (PARTITION BY unit_id) AS max_cycle FROM engine_features WHERE dataset='FD002') sub ORDER BY time ASC",
+            "format": "time_series"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {"steps": [
+                {"color": "red",    "value": 0},
+                {"color": "yellow", "value": 10},
+                {"color": "green",  "value": 20}
+              ]}
+            }
+          }
+        },
+        {
+          "id": 6,
+          "title": "Anomaly Score per Engine",
+          "type": "timeseries",
+          "gridPos": {"x": 0, "y": 18, "w": 12, "h": 7},
+          "datasource": "PostgreSQL",
+          "targets": [{
+            "rawSql": "SELECT indexed_at AS time, engine_id::text AS metric, anomaly_score FROM alerts WHERE dataset='FD002' AND alert_type='anomaly_detected' ORDER BY indexed_at ASC",
+            "format": "time_series"
+          }]
+        },
+        {
+          "id": 7,
+          "title": "Alert Count by Type",
+          "type": "bargauge",
+          "gridPos": {"x": 12, "y": 18, "w": 12, "h": 7},
+          "datasource": "PostgreSQL",
+          "targets": [{
+            "rawSql": "SELECT alert_type, COUNT(*) AS count FROM alerts WHERE dataset='FD002' GROUP BY alert_type ORDER BY count DESC",
+            "format": "table"
+          }]
+        },
+        {
+          "id": 8,
+          "title": "XGBoost RUL Model — Mean RMSE",
+          "type": "stat",
+          "gridPos": {"x": 0, "y": 25, "w": 6, "h": 4},
+          "datasource": "PostgreSQL",
+          "targets": [{
+            "rawSql": "SELECT value FROM metrics m JOIN runs r ON m.run_uuid = r.run_uuid WHERE m.key = 'mean_rmse' ORDER BY r.start_time DESC LIMIT 1",
+            "format": "table"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "decimals": 4,
+              "thresholds": {"steps": [
+                {"color": "green",  "value": 0},
+                {"color": "yellow", "value": 0.25},
+                {"color": "red",    "value": 0.30}
+              ]}
+            }
+          }
+        },
+        {
+          "id": 9,
+          "title": "AutoEncoder Anomaly Threshold",
+          "type": "stat",
+          "gridPos": {"x": 6, "y": 25, "w": 6, "h": 4},
+          "datasource": "PostgreSQL",
+          "targets": [{
+            "rawSql": "SELECT value FROM metrics m JOIN runs r ON m.run_uuid = r.run_uuid WHERE m.key = 'threshold' ORDER BY r.start_time DESC LIMIT 1",
+            "format": "table"
+          }],
+          "fieldConfig": {"defaults": {"decimals": 6}}
+        },
+        {
+          "id": 10,
+          "title": "Total Inference Results",
+          "type": "stat",
+          "gridPos": {"x": 12, "y": 25, "w": 6, "h": 4},
+          "datasource": "PostgreSQL",
+          "targets": [{
+            "rawSql": "SELECT COUNT(*) FROM alerts WHERE dataset='FD002'",
+            "format": "table"
+          }]
+        },
+        {
+          "id": 11,
+          "title": "Recent Alerts",
+          "type": "table",
+          "gridPos": {"x": 0, "y": 29, "w": 24, "h": 6},
+          "datasource": "PostgreSQL",
+          "targets": [{
+            "rawSql": "SELECT indexed_at AS \"Time\", alert_type AS \"Type\", severity AS \"Severity\", engine_id AS \"Engine\", ROUND(rul::numeric, 2) AS \"RUL\", message AS \"Message\" FROM alerts WHERE dataset='FD002' ORDER BY indexed_at DESC LIMIT 20",
+            "format": "table"
+          }]
+        }
+      ]
+    }
+
+---
+# Grafana Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: dashboard
+  labels:
+    app: grafana
+spec:
+  replicas: {{ .Values.grafana.replicas }}
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      containers:
+        - name: grafana
+          image: "{{ .Values.grafana.image.repository }}:{{ .Values.grafana.image.tag }}"
+          imagePullPolicy: {{ .Values.grafana.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.grafana.port }}
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: {{ .Values.grafana.adminUser | quote }}
+            - name: GF_SERVER_ROOT_URL
+              value: "http://34.71.60.98/grafana" # publicIP from kubectl get svc -n ingress-nginx-public
+            - name: GF_SERVER_SERVE_FROM_SUB_PATH
+              value: "true"
+            - name: GF_INSTALL_PLUGINS
+              value: "redis-datasource"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: dashboard-secrets
+                  key: db-password
+          volumeMounts:
+            - name: grafana-datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: grafana-dashboards-config
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: grafana-dashboard-phm
+              mountPath: /var/lib/grafana/dashboards
+            - name: grafana-storage # to store password
+              mountPath: /var/lib/grafana
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.grafana.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.grafana.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu:    {{ .Values.grafana.resources.requests.cpu | quote }}
+              memory: {{ .Values.grafana.resources.requests.memory | quote }}
+            limits:
+              cpu:    {{ .Values.grafana.resources.limits.cpu | quote }}
+              memory: {{ .Values.grafana.resources.limits.memory | quote }}
+      volumes:
+        - name: grafana-datasources
+          configMap:
+            name: grafana-datasources
+        - name: grafana-dashboards-config
+          configMap:
+            name: grafana-dashboards-config
+        - name: grafana-dashboard-phm
+          configMap:
+            name: grafana-dashboard-phm
+        - name: grafana-storage
+          persistentVolumeClaim:
+            claimName: grafana-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-svc
+  namespace: dashboard
+spec:
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: {{ .Values.grafana.port }}
+  type: ClusterIP
+
+---
+# Grafana PVC — persists grafana.db so password changes survive pod restarts
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-pvc
+  namespace: dashboard
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: standard-rwo
+  resources:
+    requests:
+      storage: 1Gi

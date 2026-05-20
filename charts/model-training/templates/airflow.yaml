@@ -1,0 +1,245 @@
+# charts/model-training/templates/airflow.yaml
+#
+# Apache Airflow deployed inside the model-training namespace.
+# Uses the existing PostgreSQL instance (10.72.1.3 / phmdb) as the
+# metadata backend — no extra database infrastructure needed.
+# KubernetesExecutor — each DAG task runs as an ephemeral pod in the
+# model-training namespace, no Celery / Redis broker required.
+#
+# DAG is mounted from a ConfigMap (dags-configmap below) — no Git-Sync
+# sidecar or PVC needed. The ConfigMap is updated by Helm when the DAG
+# file changes.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Airflow ConfigMap — Airflow-specific environment ─────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airflow-env-config
+  namespace: model-training
+data:
+  # LocalExecutor — runs tasks as subprocesses on the scheduler pod.
+  # KubernetesPodOperator manages its own pods independently of the executor.
+  # This is the correct pattern — KubernetesExecutor conflicts with
+  # KubernetesPodOperator by replacing the operator's pod spec with its own.
+  AIRFLOW__CORE__EXECUTOR:                    "LocalExecutor"
+  AIRFLOW__CORE__LOAD_EXAMPLES:               "False"
+  AIRFLOW__CORE__DAGS_FOLDER:                 "/opt/airflow/dags"
+  AIRFLOW__CORE__DEFAULT_TIMEZONE:            "UTC"
+  AIRFLOW__WEBSERVER__EXPOSE_CONFIG:          "True"
+  AIRFLOW__WEBSERVER__RBAC:                   "False"
+  AIRFLOW__WEBSERVER__WEB_SERVER_PORT:        "8090"
+  MODEL_TRAINING_IMAGE: {{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}
+
+---
+# ── DAGs ConfigMap — embeds the DAG file directly ────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airflow-dags
+  namespace: model-training
+data:
+  rul_training_dag.py: |
+{{ .Files.Get "dags/rul_training_dag.py" | indent 4 }}
+
+---
+# ── Airflow Scheduler Deployment ─────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-scheduler
+  namespace: model-training
+  labels:
+    app: airflow
+    component: scheduler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow
+      component: scheduler
+  template:
+    metadata:
+      labels:
+        app: airflow
+        component: scheduler
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      initContainers:
+        # Create the airflow schema in phmdb and run db migrations once
+        - name: airflow-db-init
+          image: "{{ .Values.airflow.image.repository }}:{{ .Values.airflow.image.tag }}"
+          command:
+            - bash
+            - -c
+            - |
+              airflow db upgrade
+              airflow users create \
+                --username admin \
+                --firstname MLOps \
+                --lastname Admin \
+                --role Admin \
+                --email admin@example.com \
+                --password "${AIRFLOW_ADMIN_PASSWORD}" || true
+          envFrom:
+            - configMapRef:
+                name: airflow-env-config
+          env:
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secrets
+                  key: sql-alchemy-conn
+            - name: AIRFLOW_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secrets
+                  key: admin-password
+      containers:
+        - name: scheduler
+          image: "{{ .Values.airflow.image.repository }}:{{ .Values.airflow.image.tag }}"
+          command: ["airflow", "scheduler"]
+          envFrom:
+            - configMapRef:
+                name: airflow-env-config
+          env:
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secrets
+                  key: sql-alchemy-conn
+          volumeMounts:
+            - name: dags
+              mountPath: /opt/airflow/dags/rul_training_dag.py
+              subPath: rul_training_dag.py
+          resources:
+            requests:
+              cpu:    "200m"
+              memory: "512Mi"
+            limits:
+              cpu:    "500m"
+              memory: "1Gi"
+      volumes:
+        - name: dags
+          configMap:
+            name: airflow-dags
+
+---
+# ── Airflow Webserver Deployment ──────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-webserver
+  namespace: model-training
+  labels:
+    app: airflow
+    component: webserver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow
+      component: webserver
+  template:
+    metadata:
+      labels:
+        app: airflow
+        component: webserver
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      containers:
+        - name: webserver
+          image: "{{ .Values.airflow.image.repository }}:{{ .Values.airflow.image.tag }}"
+          command: ["airflow", "webserver"]
+          ports:
+            - name: web
+              containerPort: 8090
+          envFrom:
+            - configMapRef:
+                name: airflow-env-config
+          env:
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-secrets
+                  key: sql-alchemy-conn
+          volumeMounts:
+            - name: dags
+              mountPath: /opt/airflow/dags/rul_training_dag.py
+              subPath: rul_training_dag.py
+          resources:
+            requests:
+              cpu:    "200m"
+              memory: "512Mi"
+            limits:
+              cpu:    "500m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            initialDelaySeconds: 60
+            periodSeconds:       20
+            failureThreshold:    5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            initialDelaySeconds: 30
+            periodSeconds:       10
+      volumes:
+        - name: dags
+          configMap:
+            name: airflow-dags
+
+---
+# ── Airflow Webserver Service ─────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-webserver
+  namespace: model-training
+  labels:
+    app: airflow
+    component: webserver
+spec:
+  selector:
+    app: airflow
+    component: webserver
+  ports:
+    - name: web
+      port: 8090
+      targetPort: 8090
+
+---
+# ── RBAC — Scheduler needs to create/delete pods for KubernetesExecutor ──────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: airflow-k8s-executor
+  namespace: model-training
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs:     ["create", "get", "list", "watch", "delete", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs:     ["create", "get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs:     ["list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: airflow-k8s-executor-binding
+  namespace: model-training
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.name }}
+    namespace: model-training
+roleRef:
+  kind:     Role
+  name:     airflow-k8s-executor
+  apiGroup: rbac.authorization.k8s.io

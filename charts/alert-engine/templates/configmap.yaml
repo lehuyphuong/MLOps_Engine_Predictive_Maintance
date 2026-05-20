@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alert-engine-config
+  namespace: alert-naming
+data:
+  DATASET:             {{ .Values.config.dataset | quote }}
+  GCP_PROJECT:         {{ .Values.config.gcpProject | quote }}
+  GCP_REGION:          {{ .Values.config.gcpRegion | quote }}
+  GCS_RAW_BUCKET:      {{ .Values.config.gcsRawBucket | quote }}
+  RUL_ALERT_THRESHOLD: {{ .Values.config.rulAlertThreshold | quote }}
+  DB_HOST:             {{ .Values.config.dbHost | quote }}
+  DB_PORT:             {{ .Values.config.dbPort | quote }}
+  DB_NAME:             {{ .Values.config.dbName | quote }}
+  DB_USER:             {{ .Values.config.dbUser | quote }}
+  NOTIFY_ENABLED:   "true"
+  NOTIFY_SEVERITY:  "critical"
+  ALERT_FROM_EMAIL: "lebackupphuong@gmail.com"
+  ALERT_TO_EMAIL:   "lebackupphuong@gmail.com"

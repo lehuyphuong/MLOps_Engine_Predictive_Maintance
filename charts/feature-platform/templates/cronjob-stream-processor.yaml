@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: stream-processor
+  namespace: feature-platform
+  labels:
+    app: stream-processor
+    component: feature-platform
+spec:
+  schedule: {{ .Values.streamProcessor.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: stream-processor
+        spec:
+          serviceAccountName: {{ .Values.serviceAccount.name }}
+          restartPolicy: OnFailure
+
+          containers:
+            - name: stream-processor
+              image: "{{ .Values.streamProcessor.image.repository }}:{{ .Values.streamProcessor.image.tag }}"
+              imagePullPolicy: {{ .Values.streamProcessor.image.pullPolicy }}
+              args: ["src/stream_processor.py"]
+
+              envFrom:
+                - configMapRef:
+                    name: feature-platform-config
+
+              env:
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: feature-platform-secrets
+                      key: db-password
+
+              resources:
+                requests:
+                  cpu:    {{ .Values.streamProcessor.resources.requests.cpu | quote }}
+                  memory: {{ .Values.streamProcessor.resources.requests.memory | quote }}
+                limits:
+                  cpu:    {{ .Values.streamProcessor.resources.limits.cpu | quote }}
+                  memory: {{ .Values.streamProcessor.resources.limits.memory | quote }}

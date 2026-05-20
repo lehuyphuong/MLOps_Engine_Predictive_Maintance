@@ -1,0 +1,37 @@
+# Basic auth secret must be created before helm install:
+#
+#   htpasswd -c auth devadmin
+#   kubectl create secret generic monitoring-basic-auth \
+#     --from-file=auth -n monitoring
+#
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: monitoring-ingress
+  namespace: monitoring
+  annotations:
+    kubernetes.io/ingress.class: "nginx-dev"
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: monitoring-basic-auth
+    nginx.ingress.kubernetes.io/auth-realm: "PHM Dev Access Only"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx-dev
+  rules:
+    - http:
+        paths:
+          - path: /monitoring
+            pathType: Prefix
+            backend:
+              service:
+                name: monitoring-grafana-svc
+                port:
+                  number: 3000
+          - path: /prometheus
+            pathType: Prefix
+            backend:
+              service:
+                name: prometheus-svc
+                port:
+                  number: 9090

@@ -1,0 +1,71 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-serving
+  namespace: model-serving
+  labels:
+    app: model-serving
+spec:
+  replicas: {{ .Values.deployment.replicas }}
+  selector:
+    matchLabels:
+      app: model-serving
+  template:
+    metadata:
+      labels:
+        app: model-serving
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+
+      containers:
+        - name: serving
+          image: "{{ .Values.deployment.image.repository }}:{{ .Values.deployment.image.tag }}"
+          imagePullPolicy: {{ .Values.deployment.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.deployment.port }}
+
+          envFrom:
+            - configMapRef:
+                name: model-serving-config
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.deployment.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.deployment.port }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu:    {{ .Values.deployment.resources.requests.cpu | quote }}
+              memory: {{ .Values.deployment.resources.requests.memory | quote }}
+            limits:
+              cpu:    {{ .Values.deployment.resources.limits.cpu | quote }}
+              memory: {{ .Values.deployment.resources.limits.memory | quote }}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-serving-svc
+  namespace: model-serving
+  labels:
+    app: model-serving
+spec:
+  selector:
+    app: model-serving
+  ports:
+    - name: http
+      port: 80
+      targetPort: {{ .Values.deployment.port }}
+  type: ClusterIP

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: model-serving-config
+  namespace: model-serving
+data:
+  DATASET:                {{ .Values.config.dataset | quote }}
+  GCP_PROJECT:            {{ .Values.config.gcpProject | quote }}
+  GCP_REGION:             {{ .Values.config.gcpRegion | quote }}
+  GCS_ARTIFACTS_BUCKET:   {{ .Values.config.gcsArtifactsBucket | quote }}
+  GCS_RAW_BUCKET:         {{ .Values.config.gcsRawBucket | quote }}
+  ANOMALY_MIN_CYCLES:     {{ .Values.config.anomalyMinCycles | quote }}
+  CV_STABILITY_THRESHOLD: {{ .Values.config.cvStabilityThreshold | quote }}
+  REDIS_HOST:             {{ .Values.redis.host | quote }}
+  REDIS_PORT:             {{ .Values.redis.port | quote }}

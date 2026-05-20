@@ -1,0 +1,12 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.lock.hcl
+terraform.tfvars
+
+auth
+
+google-cloud-sdk/
+
+jenkins-gke.json

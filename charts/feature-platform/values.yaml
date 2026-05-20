@@ -1,0 +1,76 @@
+# values.yaml — feature-platform chart
+
+# -------------------------------------------------------------------
+# Shared config
+# -------------------------------------------------------------------
+config:
+  dataset:      "FD002"
+  gcpProject:   "aide2-494008"
+  gcpRegion:    "us-central1"
+  gcsBucket:    "phm-raw-data-aide2-494008"
+  windowSize:   "30"
+  rulCap:       "125"
+
+# -------------------------------------------------------------------
+# Redis (online store)
+# -------------------------------------------------------------------
+redis:
+  host: "10.72.0.3"
+  port: "6379"
+
+# -------------------------------------------------------------------
+# PostgreSQL (offline store)
+# -------------------------------------------------------------------
+postgres:
+  host:     "10.72.1.3"
+  port:     "5432"
+  database: "phmdb"
+  username: "phmadmin"
+
+# -------------------------------------------------------------------
+# Stream Processor CronJob
+# -------------------------------------------------------------------
+streamProcessor:
+  schedule: "3-58/5 * * * *"
+  image:
+    repository: us-central1-docker.pkg.dev/aide2-494008/phm-stream-processor/stream-processor
+    tag: latest
+    pullPolicy: Always
+  resources:
+    requests:
+      cpu:    "250m"
+      memory: "512Mi"
+    limits:
+      cpu:    "500m"
+      memory: "1Gi"
+  # Must match data-ingestion cyclesPerRun (30).
+  # Each CronJob run loads exactly this many validated events,
+  # submits one Flink job, then exits. Keeps memory bounded.
+  batchSize: "30"
+
+# -------------------------------------------------------------------
+# Flink standalone cluster
+# -------------------------------------------------------------------
+flink:
+  jobmanager:
+    host: "flink-jobmanager"
+    port: "8081"
+
+  taskManagerReplicas: 1
+  uiNodePort: 30081
+
+  taskManager:
+    resources:
+      requests:
+        cpu:    "500m"
+        memory: "1Gi"
+      limits:
+        cpu:    "1000m"
+        memory: "1Gi"
+
+# -------------------------------------------------------------------
+# ServiceAccount / Workload Identity
+# -------------------------------------------------------------------
+serviceAccount:
+  name: feature-platform-sa
+  gcpServiceAccount: "phm-feature-platform@aide2-494008.iam.gserviceaccount.com"
