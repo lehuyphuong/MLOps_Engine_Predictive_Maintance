@@ -1,5 +1,5 @@
 """
-validate.py — Model Validation Gate
+validate.py - Model Validation Gate
 
 Runs after train_RUL.py and train_anomaly.py complete.
 Two gates must both pass before promote.py is allowed to run:
@@ -15,8 +15,8 @@ Two gates must both pass before promote.py is allowed to run:
      On first run (no previous production model) the drift check is skipped.
 
 Exit codes:
-  0 — both gates passed   → Airflow marks task SUCCESS → promote runs
-  1 — at least one failed → Airflow marks task FAILED  → promote skipped
+  0 - both gates passed   => Airflow marks task SUCCESS => promote runs
+  1 - at least one failed => Airflow marks task FAILED  => promote skipped
 
 Environment variables (from model-training-config ConfigMap):
   RMSE_THRESHOLD    0.30
@@ -42,7 +42,7 @@ from google.cloud import storage
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# Config
 DATASET          = os.environ.get("DATASET",         "FD002")
 TRAINING_MODE    = os.environ.get("TRAINING_MODE",   "offline")
 RMSE_THRESHOLD   = float(os.environ.get("RMSE_THRESHOLD",  "0.30"))
@@ -77,7 +77,7 @@ COLUMN_NAMES = (
 )
 
 
-# ── Gate 1: RMSE ──────────────────────────────────────────────────────────────
+# Gate 1: RMSE
 
 def check_rmse() -> tuple[bool, float]:
     """
@@ -109,13 +109,13 @@ def check_rmse() -> tuple[bool, float]:
     passed    = mean_rmse < RMSE_THRESHOLD
 
     log.info(
-        "RMSE gate — mean_rmse=%.4f threshold=%.2f passed=%s",
+        "RMSE gate - mean_rmse=%.4f threshold=%.2f passed=%s",
         mean_rmse, RMSE_THRESHOLD, passed,
     )
     return passed, mean_rmse
 
 
-# ── Gate 2: Feature drift ─────────────────────────────────────────────────────
+# Gate 2: Feature drift
 
 def load_current_feature_means() -> dict[str, float]:
     """
@@ -153,7 +153,7 @@ def load_current_feature_means() -> dict[str, float]:
 def load_baseline_feature_means() -> dict[str, float] | None:
     """
     Read feature means logged by the previous production run from MLflow.
-    Returns None if no production run exists yet (first run — skip drift check).
+    Returns None if no production run exists yet (first run - skip drift check).
     """
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 
@@ -171,7 +171,7 @@ def load_baseline_feature_means() -> dict[str, float] | None:
     )
 
     if runs.empty:
-        log.info("No production baseline run found — drift check skipped (first run).")
+        log.info("No production baseline run found - drift check skipped (first run).")
         return None
 
     run_id = runs.iloc[0]["run_id"]
@@ -198,24 +198,24 @@ def check_drift(current_means: dict, baseline_means: dict) -> tuple[bool, float]
             drifts.append(drift)
 
     if not drifts:
-        log.warning("No common features between current and baseline — drift check skipped.")
+        log.warning("No common features between current and baseline - drift check skipped.")
         return True, 0.0
 
     max_drift = float(max(drifts))
     passed    = max_drift < DRIFT_TOLERANCE
 
     log.info(
-        "Drift check — max_drift=%.4f tolerance=%.2f passed=%s",
+        "Drift check - max_drift=%.4f tolerance=%.2f passed=%s",
         max_drift, DRIFT_TOLERANCE, passed,
     )
     return passed, max_drift
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# Main
 
 def main():
     log.info(
-        "Validation starting — dataset=%s mode=%s "
+        "Validation starting - dataset=%s mode=%s "
         "rmse_threshold=%.2f drift_tolerance=%.2f",
         DATASET, TRAINING_MODE, RMSE_THRESHOLD, DRIFT_TOLERANCE,
     )
@@ -231,7 +231,7 @@ def main():
     baseline_means = load_baseline_feature_means()
 
     if baseline_means is None:
-        # First run — no baseline to compare against
+        # First run - no baseline to compare against
         drift_passed, max_drift = True, 0.0
         results["drift_check"] = {"skipped": True, "reason": "no_baseline"}
     else:
@@ -266,12 +266,12 @@ def main():
 
     if not overall:
         log.error(
-            "Validation FAILED — promote will be skipped. "
+            "Validation FAILED - promote will be skipped. "
             "Fix the issues above and re-trigger the DAG."
         )
         sys.exit(1)
 
-    log.info("Validation PASSED — promote will run next.")
+    log.info("Validation PASSED - promote will run next.")
     sys.exit(0)
 
 

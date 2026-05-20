@@ -1,30 +1,30 @@
 """
-train_RUL.py — XGBoost RUL Training
+train_RUL.py - XGBoost RUL Training
 Mirrors existing preprocessing script exactly, adds MLflow tracking
 and saves model artifact to GCS.
 
 Two training modes controlled by TRAINING_MODE env var:
 
-  offline — reads train_FD002.txt + test_FD002.txt + RUL_FD002.txt from GCS
+  offline - reads train_FD002.txt + test_FD002.txt + RUL_FD002.txt from GCS
              full dataset, best for initial model
              Upload files first:
                gsutil cp data/CMaps/train_FD002.txt gs://phm-raw-data-aide2-494008/offline/
                gsutil cp data/CMaps/test_FD002.txt  gs://phm-raw-data-aide2-494008/offline/
                gsutil cp data/CMaps/RUL_FD002.txt   gs://phm-raw-data-aide2-494008/offline/
 
-  online  — reads engine_features table from PostgreSQL
+  online  - reads engine_features table from PostgreSQL
             uses labeled rows (rul IS NOT NULL) for incremental retraining
             as live stream data accumulates in feature-platform namespace
 
 Pipeline (matches existing script):
   1. Load data
   2. Generate RUL labels
-  3. Feature selection — drop low-correlation sensors for FD002
+  3. Feature selection - drop low-correlation sensors for FD002
   4. MinMaxScaler normalisation
   5. Random sample selection (50 train / 25 test per engine)
-  6. XGBoost with GridSearchCV × 10 runs
-  7. Evaluate: MSE · RMSE · MAE · MAPE · S-score
-  8. Log to MLflow — params, metrics, model artifact
+  6. XGBoost with GridSearchCV x 10 runs
+  7. Evaluate: MSE - RMSE - MAE - MAPE - S-score
+  8. Log to MLflow - params, metrics, model artifact
   9. Save best model => gs://phm-model-artifacts-aide2-494008/
 
 Environment variables:
@@ -149,7 +149,7 @@ def load_offline() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
 
 def load_online() -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load from PostgreSQL engine_features — labeled rows only."""
+    """Load from PostgreSQL engine_features - labeled rows only."""
     log.info("Loading online data from PostgreSQL engine_features...")
 
     conn  = psycopg2.connect(
@@ -182,7 +182,7 @@ def load_online() -> tuple[pd.DataFrame, pd.DataFrame]:
     train = df[df["UnitNumber"].isin(train_units)].copy()
     test  = df[~df["UnitNumber"].isin(train_units)].copy()
 
-    log.info(f"Online data — train={len(train)} rows, test={len(test)} rows")
+    log.info(f"Online data - train={len(train)} rows, test={len(test)} rows")
     return train, test
 
 
@@ -269,7 +269,7 @@ def train(train_df: pd.DataFrame, test_df: pd.DataFrame) -> None:
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(f"phm-rul-xgboost-{DATASET}-{TRAINING_MODE}")
 
-    log.info(f"Starting training — mode={TRAINING_MODE} n_runs={N_RUNS}")
+    log.info(f"Starting training - mode={TRAINING_MODE} n_runs={N_RUNS}")
     t_start = time.time()
 
     mse_list = []; rmse_list = []; mae_list = []
@@ -360,7 +360,7 @@ def train(train_df: pd.DataFrame, test_df: pd.DataFrame) -> None:
 # Main
 # ---------------------------------------------------------------------------
 def main():
-    log.info(f"Model training starting — mode={TRAINING_MODE} dataset={DATASET}")
+    log.info(f"Model training starting - mode={TRAINING_MODE} dataset={DATASET}")
 
     if TRAINING_MODE == "offline":
         train_raw, test_raw, rul = load_offline()

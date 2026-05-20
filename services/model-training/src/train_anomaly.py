@@ -1,9 +1,9 @@
 """
-train_anomaly.py — Anomaly Detection Model Training
+train_anomaly.py - Anomaly Detection Model Training
 Trains a PyTorch LSTM AutoEncoder on the normal engine pool (RUL > 150) from FD002.
 
 Architecture:
-  LSTM AutoEncoder — PyTorch
+  LSTM AutoEncoder - PyTorch
   - Trained on NORMAL pool only (RUL > 150 cycles)
   - Learns to reconstruct healthy sensor patterns
   - Reconstruction error threshold saved as artifact
@@ -116,7 +116,7 @@ def gcs_write_bytes(bucket: str, key: str, data: bytes,
 
 
 # ---------------------------------------------------------------------------
-# PyTorch LSTM AutoEncoder — unchanged from original
+# PyTorch LSTM AutoEncoder - unchanged from original
 # ---------------------------------------------------------------------------
 class LSTMAutoEncoder(nn.Module):
     def __init__(self, n_features: int, seq_len: int,
@@ -164,7 +164,7 @@ def load_train() -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Preprocessing — all unchanged from original
+# Preprocessing - all unchanged from original
 # ---------------------------------------------------------------------------
 def add_rul(df: pd.DataFrame) -> pd.DataFrame:
     max_cycles = df.groupby("UnitNumber")["TimeInCycles"].max().rename("max")
@@ -194,7 +194,7 @@ def normalise_per_condition(df: pd.DataFrame,
                 norm_df.loc[mask, feature_cols]
             )
             scalers[float(cond)] = scaler
-        log.info(f"Normalised per condition — {len(scalers)} conditions")
+        log.info(f"Normalised per condition - {len(scalers)} conditions")
     else:
         scaler = MinMaxScaler()
         norm_df[feature_cols] = scaler.fit_transform(norm_df[feature_cols])
@@ -228,7 +228,7 @@ def build_sequences(df: pd.DataFrame, feature_cols: list,
 
 
 # ---------------------------------------------------------------------------
-# Training + evaluation — unchanged from original
+# Training + evaluation - unchanged from original
 # ---------------------------------------------------------------------------
 def train_autoencoder(model, X_train, epochs, batch_size, lr) -> list:
     dataset   = TensorDataset(torch.tensor(X_train))
@@ -251,7 +251,7 @@ def train_autoencoder(model, X_train, epochs, batch_size, lr) -> list:
         losses.append(epoch_loss)
 
         if epoch % 10 == 0:
-            log.info(f"  Epoch {epoch:3d}/{epochs} — loss={epoch_loss:.6f}")
+            log.info(f"  Epoch {epoch:3d}/{epochs} - loss={epoch_loss:.6f}")
 
         if epoch_loss < best_loss:
             best_loss = epoch_loss; no_improve = 0
@@ -315,7 +315,7 @@ def save_artifacts(model, scalers, threshold, n_features, run_id) -> str:
 # Main
 # ---------------------------------------------------------------------------
 def main():
-    log.info(f"Anomaly training starting — dataset={DATASET} "
+    log.info(f"Anomaly training starting - dataset={DATASET} "
              f"normal_threshold=RUL>{NORMAL_RUL_THRESHOLD} device={DEVICE}")
 
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
@@ -325,7 +325,7 @@ def main():
     df           = feature_selection(df)
     feature_cols = get_feature_cols(df)
     n_features   = len(feature_cols)
-    log.info(f"Features: {n_features} — {feature_cols}")
+    log.info(f"Features: {n_features} - {feature_cols}")
 
     normal_pool = df[df["RUL"] > NORMAL_RUL_THRESHOLD].copy()
     degrad_pool = df[df["RUL"] <= NORMAL_RUL_THRESHOLD].copy()
@@ -341,7 +341,7 @@ def main():
              f"Degraded sequences: {X_degrad.shape}")
 
     if len(X_normal) == 0:
-        raise ValueError("No normal sequences — increase NORMAL_RUL_THRESHOLD")
+        raise ValueError("No normal sequences - increase NORMAL_RUL_THRESHOLD")
 
     with mlflow.start_run(run_name=f"autoencoder_{DATASET}") as run:
         mlflow.log_params({
@@ -361,7 +361,7 @@ def main():
         model  = LSTMAutoEncoder(n_features, SEQUENCE_LENGTH)
         losses = train_autoencoder(model, X_normal, EPOCHS,
                                    BATCH_SIZE, LEARNING_RATE)
-        log.info(f"Training complete — {len(losses)} epochs, "
+        log.info(f"Training complete - {len(losses)} epochs, "
                  f"final loss={losses[-1]:.6f}")
 
         normal_errors = get_reconstruction_errors(model, X_normal)
@@ -377,7 +377,7 @@ def main():
         precision = report.get("1", {}).get("precision", 0.0)
         recall    = report.get("1", {}).get("recall",    0.0)
         f1        = report.get("1", {}).get("f1-score",  0.0)
-        log.info(f"Detection — precision={precision:.3f} "
+        log.info(f"Detection - precision={precision:.3f} "
                  f"recall={recall:.3f} f1={f1:.3f}")
 
         mlflow.log_metrics({
@@ -396,7 +396,7 @@ def main():
                                  n_features, run.info.run_id)
         mlflow.log_param("artifacts_gcs_uri", gcs_uri)
 
-        log.info(f"Anomaly model complete — threshold={threshold:.6f} "
+        log.info(f"Anomaly model complete - threshold={threshold:.6f} "
                  f"f1={f1:.3f} artifacts={gcs_uri}")
 
 

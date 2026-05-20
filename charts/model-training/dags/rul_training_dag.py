@@ -1,24 +1,22 @@
 """
-rul_training_dag.py — Model Training Pipeline DAG
+rul_training_dag.py - Model Training Pipeline DAG
 
 Replaces the three manual kubectl Jobs (rul-training-job, anomaly-training-job,
 registry-job) with a proper Airflow DAG that enforces task dependencies,
 provides retry logic, and records full run history in the Airflow UI.
 
 DAG topology:
-    train_rul ──┐
-                ├──► validate ──► promote
-    train_anomaly ──┘
+    train_rul + train_anomaly => validate => promote
 
 Task details:
-    train_rul     — runs train_RUL.py   (XGBoost, 10 runs, logs to MLflow)
-    train_anomaly — runs train_anomaly.py (LSTM AE, logs to MLflow)
-                    both run in PARALLEL — independent models, no data dependency
-    validate      — runs validate.py
+    train_rul     - runs train_RUL.py   (XGBoost, 10 runs, logs to MLflow)
+    train_anomaly - runs train_anomaly.py (LSTM AE, logs to MLflow)
+                    both run in PARALLEL - independent models, no data dependency
+    validate      - runs validate.py
                     RMSE gate: mean_rmse < RMSE_THRESHOLD (0.30)
                     Drift check: feature drift < DRIFT_TOLERANCE (0.05)
                     Exits non-zero on failure → Airflow marks FAILED → promote skipped
-    promote       — runs promote.py
+    promote       - runs promote.py
                     Registers winning model in MLflow Model Registry
                     Pushes serving manifest to GCS for model-serving namespace
 
@@ -27,7 +25,7 @@ Can be triggered manually from the Airflow UI or REST API.
 
 Each task runs as a KubernetesPodOperator pod in the model-training namespace,
 using the same Docker image and ConfigMap as the existing manual Jobs.
-No Celery / Redis broker needed — KubernetesExecutor only.
+No Celery / Redis broker needed - KubernetesExecutor only.
 """
 
 from __future__ import annotations
@@ -40,7 +38,7 @@ from airflow.providers.cncf.kubernetes.operators.pod import KubernetesPodOperato
 from airflow.utils.trigger_rule import TriggerRule
 from kubernetes.client import models as k8s
 
-# ── Shared pod configuration ──────────────────────────────────────────────────
+# Shared pod configuration
 # All tasks use the same model-training image and inherit env from the
 # existing model-training-config ConfigMap and model-training-secrets Secret.
 # This means zero changes to train_RUL.py, train_anomaly.py, or promote.py.
@@ -88,7 +86,7 @@ DEFAULT_ARGS = {
     "execution_timeout": timedelta(hours=3),
 }
 
-# ── DAG ───────────────────────────────────────────────────────────────────────
+# DAG
 with DAG(
     dag_id           = "model_training_pipeline",
     description      = "RUL XGBoost + Anomaly LSTM-AE → validate → promote",
@@ -100,7 +98,7 @@ with DAG(
     doc_md           = __doc__,
 ) as dag:
 
-    # ── Task 1a: RUL Model Training ───────────────────────────────────────────
+    # Task 1a: RUL Model Training
     train_rul = KubernetesPodOperator(
         task_id                = "train_rul",
         name                   = "train-rul",
@@ -118,7 +116,7 @@ with DAG(
         log_events_on_failure  = True,
     )
 
-    # ── Task 1b: Anomaly Model Training (parallel with train_rul) ────────────
+    # Task 1b: Anomaly Model Training (parallel with train_rul)
     train_anomaly = KubernetesPodOperator(
         task_id                = "train_anomaly",
         name                   = "train-anomaly",
@@ -143,7 +141,7 @@ with DAG(
         log_events_on_failure  = True,
     )
 
-    # ── Task 2: Validation ────────────────────────────────────────────────────
+    # Task 2: Validation
     validate = KubernetesPodOperator(
         task_id                = "validate",
         name                   = "validate-models",
@@ -162,7 +160,7 @@ with DAG(
         trigger_rule           = TriggerRule.ALL_SUCCESS,
     )
 
-    # ── Task 3: Promote ───────────────────────────────────────────────────────
+    # Task 3: Promote
     promote = KubernetesPodOperator(
         task_id                = "promote",
         name                   = "promote-models",
@@ -180,10 +178,4 @@ with DAG(
         log_events_on_failure  = True,
     )
 
-    # ── Dependency wiring ─────────────────────────────────────────────────────
-    #
-    #   train_rul ──┐
-    #               ├──► validate ──► promote
-    #   train_anomaly ──┘
-    #
     [train_rul, train_anomaly] >> validate >> promote

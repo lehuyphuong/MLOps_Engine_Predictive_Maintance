@@ -8,7 +8,7 @@ Helm chart (flink-cluster.yaml) — no flink-conf.yaml patching.
 
 Flink reads env vars with the prefix FLINK_ where dots become underscores:
   FLINK_REST_BIND__ADDRESS=0.0.0.0
-    → rest.bind-address: 0.0.0.0
+    => rest.bind-address: 0.0.0.0
 But this prefix convention is unreliable across versions.
 
 The reliable approach used here is direct -D flags to jobmanager.sh,
@@ -45,7 +45,7 @@ overrides = {
     # Pin BlobServer to a fixed port so the Helm Service can expose it.
     # By default Flink picks a random ephemeral port — the TaskManager
     # then tries to connect to that port on the JobManager, which is not
-    # in the Service's port list → Connection timed out.
+    # in the Service's port list => Connection timed out.
     "blob.server.port":       "6125",
 }
 

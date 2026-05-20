@@ -18,6 +18,4 @@ data:
   DB_USER:                {{ .Values.postgres.username | quote }}
   FLINK_JOBMANAGER_HOST:  {{ .Values.flink.jobmanager.host | quote }}
   FLINK_JOBMANAGER_PORT:  {{ .Values.flink.jobmanager.port | quote }}
-  # Caps records loaded per CronJob run — prevents OOMKill on the submitter pod.
-  # Keep in sync with data-ingestion cyclesPerRun (currently 50).
   STREAM_BATCH_SIZE:      {{ .Values.streamProcessor.batchSize | quote }}
